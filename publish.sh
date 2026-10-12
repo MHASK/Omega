@@ -7,7 +7,7 @@ NOTES="${2:?Provide release notes}"
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { print -u2 'Push this release commit to origin/main first.'; exit 1; }
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DEST/Omega.app/Contents/Info.plist")"
 [[ "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || exit 1
-codesign --verify --deep --strict -R 'anchor apple generic and identifier "local.folio.notes" and certificate leaf[subject.OU] = "A5S8X4RCAS"' "$DEST/Omega.app"
+codesign --verify --deep --strict -R '=anchor apple generic and identifier "local.folio.notes" and certificate leaf[subject.OU] = "A5S8X4RCAS"' "$DEST/Omega.app"
 python3 - "$DEST" "$VERSION" <<'VERIFY'
 import hashlib,json,pathlib,plistlib,sys
 root=pathlib.Path(sys.argv[1]); version=sys.argv[2]; m=json.loads((root/'Omega-update.json').read_text()); a=root/f'Omega-{version}.zip'
