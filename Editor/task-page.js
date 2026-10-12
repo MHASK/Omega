@@ -35,14 +35,14 @@ export class TaskPage {
   if(kind==='goal'){const goal=this.model.goals.find(g=>g.details.id===id);if(!goal)return false;this.openGoal(goal);return true;}
   const found=this.lookup(id);if(!found)return false;this.openDetail(found.item);const title=this.element.querySelector('.task-detail-title,.task-composer-title');title?.classList.add('folio-search-hit');setTimeout(()=>title?.classList.remove('folio-search-hit'),2300);return true;
  }
- descriptionField(item,onChange){const host=el('div','task-description-host');this.description=descriptionEditor(host,item,onChange,{readOnly:this.readOnly,...this.options});this.descriptions.push(this.description);return host;}
+ descriptionField(item,onChange){const host=el('div','task-description-host');host.dataset.liveField='item:'+item.id+':description';this.description=descriptionEditor(host,item,onChange,{readOnly:this.readOnly,...this.options});this.descriptions.push(this.description);return host;}
  touch(item){item.details??={};if(!item.details.id){const previous=item.id;item.id=newTaskID();item.details.id=item.id;if(this.detail===previous)this.detail=item.id;if(this.goalView===previous)this.goalView=item.id;if(this.expandedList.delete(previous))this.expandedList.add(item.id);}return item;}
  change(render=false,typing=false){if(this.readOnly)return;this.raw=serializeTasks(this.model);this.onChange(this.raw,typing);if(render)this.render();}
  setReadOnly(value){this.readOnly=value;this.descriptions.forEach(editor=>editor.setEditable(!value,false));if(value)this.popovers.forEach(close=>close());this.element.querySelectorAll('[data-mutates]').forEach(n=>n.disabled=value);this.element.querySelectorAll('.task-card').forEach(n=>n.draggable=!value);}
  get busy(){return !!this.composer||this.removeConfirm;}
  resizeFields(){this.element.querySelectorAll('textarea').forEach(n=>{n.style.height='auto';n.style.height=n.scrollHeight+'px';});}
  textField(item,key,placeholder,cls,onInput){
-  const input=formControl(el('textarea',cls));input.rows=1;input.value=item[key]||'';input.placeholder=placeholder;input.setAttribute('aria-label',placeholder);input.dataset.field=key;input.maxLength=key==='description'?100000:10000;
+  const input=formControl(el('textarea',cls));input.rows=1;input.value=item[key]||'';input.placeholder=placeholder;input.setAttribute('aria-label',placeholder);input.dataset.field=key;input.dataset.liveField=item.id?'item:'+item.id+':'+key:key;input.maxLength=key==='description'?100000:10000;
   const size=()=>{input.classList.toggle('is-empty',!input.value.trim());input.style.height='auto';input.style.height=input.scrollHeight+'px';};queueMicrotask(size);
   input.oninput=()=>{item[key]=input.value;size();onInput?.();};
   if(key==='title')input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();this.description?.commands?.focus();}};

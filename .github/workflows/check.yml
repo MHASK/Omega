@@ -29,3 +29,5 @@ jobs:
       - run: '"$RUNNER_TEMP/GitSyncCheck"'
       - run: xcrun swiftc -parse-as-library Tests/WebLiveCheck.swift -o "$RUNNER_TEMP/WebLiveCheck" -framework AppKit -framework WebKit
       - run: '"$RUNNER_TEMP/WebLiveCheck" "$PWD/Resources"'
+      - run: xcrun swiftc -parse-as-library Tests/WebPresenceCheck.swift -o "$RUNNER_TEMP/WebPresenceCheck" -framework AppKit -framework WebKit
+      - run: OMEGA_NODE="$(command -v node)" "$RUNNER_TEMP/WebPresenceCheck" "$PWD/Resources"

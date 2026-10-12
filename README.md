@@ -104,8 +104,10 @@ Original code: [Apache License 2.0](LICENSE). Third-party components keep the li
 
 ### Live collaboration
 
-Settings → Git sync now includes **Live editing**. Connect the same Git repository and branch on each Mac, set your trusted relay address, and enable it. Open the same note to write together; the footer shows Live and the people present. Notes, task fields, subtasks, and linked goals merge through Yjs. Local recovery remains active while offline.
+Settings → Git sync now includes **Live editing**. Connect the same Git repository and branch on each Mac, set your trusted relay address, and enable it. Open the same note to write together; the footer shows Live and the people present. Collaborators have a small pastel cursor with their verified GitHub/GitLab name and a soft highlight over selected text. Cursor positions follow the text as others edit, including when several people share the same paragraph. Notes, task fields, subtasks, and linked goals merge through Yjs. Local recovery remains active while offline.
 
 The hosted relay for this installation is `https://omega.naridon.com`. It permits repositories under `MHASK` on GitHub and `ashiqwayanad007` on GitLab, with each participant's write permission checked separately. Other deployments can choose their own allowlist. No note is uploaded simply by installing the app.
 
 [Relay setup and trust model](Relay/README.md) includes Docker Compose, HTTPS, access checks, and the zero-persistence model. Git carries notes, attachments, and the shared editing checkpoints under `.omega/live/`. Live editing shares open document contents; the relay never writes them to disk and forgets a room when its last participant leaves. Pause live editing before a Git sync. Live undo is author-local within the session; durable Markdown history stays local.
+
+Cursor and selection updates are ephemeral: they never enter Markdown, Git checkpoints, or undo history. Visual and source notes show precise carets and selections; task titles do too. Task descriptions show a small named editing indicator. Cursors disappear on disconnect and return after reconnecting.

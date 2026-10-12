@@ -137,7 +137,7 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any], let type = body["type"] as? String, let notebook else { return }
         switch type {
-        case "liveReady", "liveCheckpoint", "liveConflict": LiveCollaboration.shared.handle(body, editor: self)
+        case "liveReady", "liveCheckpoint", "liveConflict", "liveAwareness": LiveCollaboration.shared.handle(body, editor: self)
         case "liveNotice": notebook.showMessage(body["message"] as? String ?? "Live editing is active")
         case "ready": ready = true; update()
         case "change":

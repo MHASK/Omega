@@ -236,3 +236,14 @@ input:is([type=checkbox],[type=radio]):disabled{cursor:default;opacity:.55}
 .goal-progress .completion-ring{width:16px;height:16px;flex-basis:16px}
 .goal-detail-progress .completion-ring{width:20px;height:20px;flex-basis:20px}
 .task-goal-badge .completion-ring{width:12px;height:12px;flex-basis:12px}
+
+/* Ephemeral collaborators: zero-width carets leave document layout untouched. */
+.live-caret{position:relative;display:inline;border-left:2px solid var(--peer-color);margin-left:-1px;margin-right:-1px;pointer-events:none;user-select:none;-webkit-user-select:none;word-break:normal}
+.live-caret-name{position:absolute;left:-2px;bottom:100%;z-index:8;display:block;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--peer-color);color:#202125;border-radius:3px 3px 3px 0;padding:3px 5px;font:500 10px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:0;text-indent:0;text-decoration:none}
+.live-selection{border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.live-presence-layer{position:fixed;inset:0;z-index:8;pointer-events:none;user-select:none;-webkit-user-select:none;overflow:hidden}
+.live-text-overlay{position:absolute;overflow:hidden;pointer-events:none}
+.live-text-overlay pre{margin:0;border:0;white-space:pre-wrap;overflow-wrap:break-word;box-sizing:border-box;color:transparent;background:transparent;min-height:100%}
+.live-text-caret{display:inline-block;height:1.2em;vertical-align:text-bottom;width:0}
+.live-text-caret .live-caret-name{bottom:auto;top:0;transform:translateY(-35%)}
+.live-field-presence{position:absolute;background:var(--peer-color);color:#202125;border-radius:4px;padding:3px 6px;font:500 10px/1.2 -apple-system,BlinkMacSystemFont,sans-serif}

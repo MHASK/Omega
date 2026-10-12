@@ -66,6 +66,7 @@ struct LiveConfiguration: Codable, Equatable {
     var hasSession: Bool { checkpoint != nil }
     func revealBackups() { NSWorkspace.shared.open(directory) }
     func stop() {
+        bridge?.webView?.evaluateJavaScript("window.folio.liveMessage({type:'offline'})", completionHandler: nil)
         generation = UUID(); retry?.cancel(); retry = nil; socket?.cancel(with: .goingAway, reason: nil); socket = nil
         ready = false; active = false; connecting = false; peers = []; identity = ""; context = nil; checkpoint = nil; bridge = nil; stoppedForError = false
     }
@@ -107,6 +108,10 @@ struct LiveConfiguration: Codable, Equatable {
                 try LiveCheckpointStore.write(next, to: context.3, root: context.0.url)
                 checkpoint = next; connect()
             } catch { stoppedForError = true; connecting = false; status = "Live editing paused: couldn’t save its Git checkpoint." }
+        case "liveAwareness":
+            guard ready, let socket, let update = body["update"] as? String, update.utf8.count <= 8192, let lineage = body["lineage"] as? String else { return }
+            let message: [String: Any] = ["type": "awareness", "update": update, "lineage": lineage]
+            socket.send(.string(String(decoding: AssistantWire.json(message), as: UTF8.self))) { _ in }
         case "liveCheckpoint":
             guard let state = body["state"] as? String, let text = body["text"] as? String, let context else { return }
             do {
@@ -163,13 +168,14 @@ struct LiveConfiguration: Codable, Equatable {
                     if type == "peers" { peers = message["users"] as? [String] ?? []; continue }
                     if type == "ack" { if message["sequence"] as? Int == sequence { status = "Live · synced" }; continue }
                     if type == "state" { ready = true; active = true; connecting = false; status = "Live" }
-                    if type == "state" || type == "update" {
+                    if type == "state" || type == "update" || type == "awareness" {
                         _ = try await bridge?.webView?.evaluateJavaScript("window.folio.liveMessage(\(String(decoding: AssistantWire.json(message), as: UTF8.self)))")
                     }
                 }
             } catch {
                 guard ticket == generation else { return }
                 ready = false; active = false; connecting = false; peers = []
+                bridge?.webView?.evaluateJavaScript("window.folio.liveMessage({type:'offline'})", completionHandler: nil)
                 status = stoppedForError ? error.localizedDescription : "Offline · saved on this Mac"
                 if !stoppedForError {
                     retry = Task { try? await Task.sleep(nanoseconds: 4_000_000_000); if !Task.isCancelled && ticket == generation { connect() } }

@@ -230,7 +230,7 @@ function keyDown(view,event){
 }
 function createEditor(text,shared=null){
  editor?.destroy();$('editor').replaceChildren();
- editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch,...(shared?[shared.extension()]:[])],...(shared?{}:noteContent(text)),editable:!readOnly&&!undoHistory.busy,
+ editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch,...(shared?shared.extensions():[])],...(shared?{}:noteContent(text)),editable:!readOnly&&!undoHistory.busy,
   editorProps:{attributes:{role:'textbox','aria-label':'Note body','aria-multiline':'true',spellcheck:'true'},handleKeyDown:keyDown,
    handlePaste(view,event){
     const text=event.clipboardData?.getData('text/plain');const html=event.clipboardData?.getData('text/html');
@@ -355,9 +355,9 @@ window.folio={
    mount(session){loading=true;hideMenus();sourceMode=session.kind==='source';taskMode=session.kind==='tasks';scroller.hidden=sourceMode||taskMode;source.hidden=!sourceMode;taskPage.element.hidden=!taskMode;$('mode').hidden=true;
     if(session.kind==='rich')createEditor('',session);else{editor?.destroy();editor=null;if(taskMode)taskPage.load(session.text(),{identity});else source.value=session.text();}loading=false;},
    refresh(session){
-    loading=true;const active=document.activeElement,field=active?.dataset?.field||active?.getAttribute('aria-label'),from=active?.selectionStart,to=active?.selectionEnd,scroll=scroller.scrollTop;
+    loading=true;const active=document.activeElement,field=active?.dataset?.liveField||active?.dataset?.field||active?.getAttribute('aria-label'),from=active?.selectionStart,to=active?.selectionEnd,scroll=scroller.scrollTop;
     if(taskMode){const viewScroll=taskPage.element.querySelector('.tasks-body,.task-detail-scroller')?.scrollTop||0;taskPage.load(session.text(),{identity});const container=taskPage.element.querySelector('.tasks-body,.task-detail-scroller');if(container)container.scrollTop=viewScroll;
-     if(field){const target=[...taskPage.element.querySelectorAll('textarea,input,[role=textbox]')].find(n=>(n.dataset.field||n.getAttribute('aria-label'))===field);target?.focus({preventScroll:true});if(target?.setSelectionRange&&from!==undefined)target.setSelectionRange(Math.min(from,target.value.length),Math.min(to,target.value.length));}
+     if(field){const target=[...taskPage.element.querySelectorAll('textarea,input,[role=textbox]')].find(n=>(n.dataset.liveField||n.dataset.field||n.getAttribute('aria-label'))===field);target?.focus({preventScroll:true});if(target?.setSelectionRange&&from!==undefined)target.setSelectionRange(Math.min(from,target.value.length),Math.min(to,target.value.length));}
     }else{const start=source.selectionStart,end=source.selectionEnd;source.value=session.text();source.setSelectionRange(Math.min(start,source.value.length),Math.min(end,source.value.length));}
     scroller.scrollTop=scroll;loading=false;
    }};

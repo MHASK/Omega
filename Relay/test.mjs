@@ -5,11 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {WebSocket} from 'ws';
 import * as Y from 'yjs';
+import {Awareness,encodeAwarenessUpdate,applyAwarenessUpdate} from 'y-protocols/awareness';
 import {createRelay,verifyAccess,scope} from './server.mjs';
 const encode=doc=>Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64');
 const apply=(doc,data)=>Y.applyUpdate(doc,Buffer.from(data,'base64'));
 const seed=()=>{const d=new Y.Doc({gc:false});d.getMap('meta').set('version',1);d.getMap('meta').set('lineage',crypto.randomUUID());d.getMap('meta').set('kind','source');d.getText('source').insert(0,'Hello world');return d;};
-async function start(dir){const r=createRelay({directory:dir,verify:async m=>{scope(m);if(m.token!=='test-token')throw Error();return {key:m.path==='other.md'?'other':'test',name:'writer'};}});await new Promise(done=>r.server.listen(0,'127.0.0.1',done));return r;}
+async function start(dir){const r=createRelay({directory:dir,verify:async m=>{scope(m);if(!['test-token','bob-token','cara-token'].includes(m.token))throw Error();return {key:m.path==='other.md'?'other':'test',name:m.token==='bob-token'?'Bob':m.token==='cara-token'?'Cara':'Alice'};}});await new Promise(done=>r.server.listen(0,'127.0.0.1',done));return r;}
 async function client(relay,doc,extra={}){
  const ws=new WebSocket('ws://127.0.0.1:'+relay.server.address().port+'/live');const queue=[],waiters=[];
  ws.on('message',data=>{const m=JSON.parse(data);if(m.type==='peers')return;const next=waiters.shift();next?next(m):queue.push(m);});
@@ -56,4 +57,28 @@ test('last participant leaving erases the room without a server restart',async()
   const doc=new Y.Doc();apply(doc,state.state);assert.equal(doc.getText('source').toString(),'New session: Hello world');
   b.ws.close();await new Promise(resolve=>b.ws.once('close',resolve));
  }finally{await relay.close();}
+});
+
+
+test('three live cursors, verified names, late join, room isolation, anti-spoofing and disconnect removal',async()=>{
+ const relay=await start(),sockets=[],docs=[],awareness=[];
+ try{
+  const initial=seed(),a=await client(relay,initial),b=await client(relay,initial,{token:'bob-token'});sockets.push(a.ws,b.ws);
+  const first=await a.next();await b.next();assert.equal(first.presence,true);
+  const make=()=>{const d=new Y.Doc();apply(d,first.state);docs.push(d);const aw=new Awareness(d);awareness.push(aw);return aw;};
+  const aa=make(),ab=make();
+  aa.setLocalState({user:{name:'FORGED',color:'url(evil)'},cursor:{anchor:Y.createRelativePositionFromTypeIndex(aa.doc.getText('source'),2),head:Y.createRelativePositionFromTypeIndex(aa.doc.getText('source'),8)},field:'source'});
+  const send=(c,aw)=>c.ws.send(JSON.stringify({type:'awareness',lineage:initial.getMap('meta').get('lineage'),update:Buffer.from(encodeAwarenessUpdate(aw,[aw.clientID])).toString('base64')}));
+  send(a,aa);const received=await b.next();assert.equal(received.type,'awareness');applyAwarenessUpdate(ab,Buffer.from(received.update,'base64'),'relay');
+  assert.equal(ab.getStates().get(aa.clientID).user.name,'Alice');assert.match(ab.getStates().get(aa.clientID).user.color,/^#[A-F0-9]{6}$/);
+  const c=await client(relay,initial,{token:'cara-token'});sockets.push(c.ws);await c.next();assert.equal((await c.next()).type,'awareness','late join receives active cursors');
+  const ac=make();ac.setLocalState({cursor:null});send(c,ac);await a.next();await b.next();
+  ab.setLocalState({cursor:null});send(b,ab);await a.next();await c.next();
+  const other=await client(relay,seed(),{path:'other.md'});sockets.push(other.ws);await other.next();let isolatedPresence=0;other.ws.on('message',data=>{if(JSON.parse(data).type==='awareness')isolatedPresence++;});
+  const checkpoint=encode(aa.doc);aa.setLocalStateField('cursor',null);send(a,aa);await b.next();await c.next();assert.equal(encode(aa.doc),checkpoint,'presence is never part of saved Yjs state');
+  await new Promise(resolve=>setTimeout(resolve,80));assert.equal(isolatedPresence,0,'presence never crosses document rooms');
+  // An authenticated peer still cannot replace another connection’s cursor.
+  send(c,aa);assert.equal((await c.next()).type,'error');const removal=await b.next();applyAwarenessUpdate(ab,Buffer.from(removal.update,'base64'),'relay');assert.ok(!ab.getStates().has(ac.clientID));
+  a.ws.close();await new Promise(resolve=>a.ws.once('close',resolve));const left=await b.next();applyAwarenessUpdate(ab,Buffer.from(left.update,'base64'),'relay');assert.ok(!ab.getStates().has(aa.clientID),'cursor removed on disconnect');
+ }finally{for(const ws of sockets)ws.terminate();for(const aw of awareness)aw.destroy();for(const d of docs)d.destroy();await relay.close();}
 });

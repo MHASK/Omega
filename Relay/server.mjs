@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {RoomPresence} from './presence.mjs';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {WebSocketServer} from 'ws';
@@ -52,7 +53,7 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
   if(rooms.has(key))return {room:rooms.get(key),created:false};
   if(rooms.size>=maxRooms)throw Error('Relay is full');
   const doc=new Y.Doc({gc:false});try{Y.applyUpdate(doc,decode(seed));validate(doc);if(Y.encodeStateAsUpdate(doc).length>MAX_STATE)throw Error('Too large');}catch(error){doc.destroy();throw error;}
-  const value={doc,clients:new Set(),key};rooms.set(key,value);return {room:value,created:true};
+  const value={doc,clients:new Set(),key};value.presence=new RoomPresence(doc,value.clients,send);rooms.set(key,value);return {room:value,created:true};
  }
  const send=(ws,m)=>{if(ws.readyState===1){if(ws.bufferedAmount>8*1024*1024){ws.close(1013);return;}ws.send(JSON.stringify(m));}};
  const presence=r=>{const users=[...new Set([...r.clients].map(c=>c.person))];for(const c of r.clients)send(c,{type:'peers',users});};
@@ -68,7 +69,7 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
      if(inflight||m.type!=='join'||m.protocol!==1)throw Error('Sign in required');inflight=true;
      const identity=await verify(m);m.token=null;if(ws.readyState!==1)return;
      const loaded=room(identity.key,m.seed);active=loaded.room;ws.person=identity.name;authorized=true;clearTimeout(authTimer);
-     active.clients.add(ws);send(ws,{type:'state',state:encode(Y.encodeStateAsUpdate(active.doc)),created:loaded.created});presence(active);
+     active.clients.add(ws);send(ws,{type:'state',state:encode(Y.encodeStateAsUpdate(active.doc)),created:loaded.created,presence:true});active.presence.join(ws);presence(active);
      expiry=setTimeout(()=>ws.close(4001,'Refresh access'),sessionMS);return;
     }
     if(m.type==='update'){
@@ -78,11 +79,14 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
      Y.applyUpdate(active.doc,update);
      for(const client of active.clients)if(client!==ws)send(client,{type:'update',update:m.update});
      send(ws,{type:'ack',sequence:m.sequence});
+    }else if(m.type==='awareness'){
+     if(m.lineage!==active.doc.getMap('meta').get('lineage'))throw Error('Different shared baseline');
+     active.presence.receive(ws,m);
     }else if(m.type==='ping')send(ws,{type:'pong'});else throw Error('Invalid message');
    }catch{send(ws,{type:'error',message:authorized?'The relay could not forward this change. Your local copy is safe.':'Could not join. Check the allowed repository and your GitHub or GitLab write access.'});ws.close(4003,'Request rejected');}
   });
   ws.on('error',()=>{});
-  ws.on('close',()=>{clearTimeout(authTimer);clearTimeout(expiry);if(active){active.clients.delete(ws);presence(active);if(!active.clients.size){rooms.delete(active.key);active.doc.destroy();}}});
+  ws.on('close',()=>{clearTimeout(authTimer);clearTimeout(expiry);if(active){active.clients.delete(ws);active.presence.leave(ws);presence(active);if(!active.clients.size){rooms.delete(active.key);active.presence.destroy();active.doc.destroy();}}});
  });
  const heartbeat=setInterval(()=>{for(const ws of wss.clients){if(!ws.alive){ws.terminate();continue;}ws.alive=false;ws.ping();}for(const [ip,v] of attempts)if(Date.now()-v.at>60000)attempts.delete(ip);},30000);heartbeat.unref();
  return {server,async close(){clearInterval(heartbeat);for(const ws of wss.clients)ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>server.close(resolve));}};
