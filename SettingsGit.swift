@@ -20,7 +20,7 @@ import AppKit
         try persist(next)
     }
     func disconnect(_ value: GitNotebook) {
-        do { try persist(notebooks.filter { $0 != value }) }
+        do { try persist(notebooks.filter { $0 != value }); LiveCollaboration.shared.forget(folder: value.path) }
         catch { message = error.localizedDescription }
     }
     private func persist(_ next: [GitNotebook]) throws {
@@ -76,6 +76,7 @@ import AppKit
     }
     func sync(_ entry: GitNotebook, notebook: Notebook) {
         guard !busy else { return }
+        if LiveCollaboration.shared.hasSession { message = "Pause live editing before syncing this notebook with Git."; return }
         notebook.afterSync {
             guard notebook.save() else { return }
             self.busy = true; notebook.gitSyncing = true; self.messages[entry.path] = "Syncing…"
@@ -99,62 +100,95 @@ import AppKit
 struct SettingsGitView: View {
     @ObservedObject var notebook: Notebook
     @ObservedObject private var git = GitNotebooks.shared
+    @ObservedObject private var live = LiveCollaboration.shared
     @State private var provider: GitProvider = .github
     @State private var address = ""
+    @State private var cloning = false
+    @State private var selectedFolder = ""
+    @State private var relay = "https://omega.naridon.com"
     private var scale: CGFloat { CGFloat(notebook.zoom) }
     private var muted: Color { Color(nsColor: Ink.muted) }
+    private var selected: GitNotebook? { git.notebooks.first { $0.path == selectedFolder } ?? git.notebooks.first }
     var body: some View {
-        VStack(spacing: 18 * scale) {
-            SettingsCard("Your existing accounts", subtitle: "Omega uses the GitHub or GitLab CLI on this Mac.", scale: scale) {
-                ForEach(GitProvider.allCases) { item in
-                    HStack {
-                        Text(item.rawValue)
-                        Spacer()
-                        Text(git.accounts[item] ?? "Checking…").foregroundStyle(muted).lineLimit(1)
-                    }.padding(.vertical, 3 * scale)
-                }
-            } footer: {
-                HStack {
-                    Text("No Omega account or separate token.")
-                    Spacer()
-                    Button("Refresh") { git.refreshAccounts() }.disabled(git.accountLoading).buttonStyle(.plain)
-                }
+        VStack(alignment: .leading, spacing: 24 * scale) {
+            VStack(alignment: .leading, spacing: 12 * scale) {
+                HStack { caption("ACCOUNTS"); Spacer(); Button { git.refreshAccounts() } label: { OpusIcon(glyph: "\u{f021}", size: 11 * scale) }.buttonStyle(.plain).foregroundStyle(muted).disabled(git.accountLoading).help("Refresh accounts").accessibilityLabel("Refresh accounts") }
+                VStack(spacing: 0) {
+                    ForEach(GitProvider.allCases) { item in
+                        HStack(spacing: 11 * scale) {
+                            Image(systemName: "person.crop.circle").font(.system(size: 19 * scale, weight: .light)).foregroundStyle(muted).frame(width: 28 * scale)
+                            Text(item.rawValue).fontWeight(.medium)
+                            Spacer(minLength: 8)
+                            Text(git.accounts[item] ?? "Checking…").foregroundStyle(muted).lineLimit(1)
+                        }.font(.system(size: 11 * scale)).padding(.horizontal, 16 * scale).padding(.vertical, 13 * scale)
+                        if item == .github { line.padding(.leading, 55 * scale) }
+                    }
+                }.background(surface, in: RoundedRectangle(cornerRadius: 8 * scale)).overlay(RoundedRectangle(cornerRadius: 8 * scale).stroke(border, lineWidth: 1))
+                Text("Your existing CLI logins. No new account.").font(.system(size: 10 * scale)).foregroundStyle(muted)
             }
-            SettingsCard("Git notebooks", subtitle: "Share Markdown notes, tasks, and attachments through your repository.", scale: scale) {
-                if git.notebooks.isEmpty {
-                    Text("Connect a Git folder or clone a repository to get started.").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(git.notebooks) { item in
-                    VStack(alignment: .leading, spacing: 6 * scale) {
-                        HStack(spacing: 10 * scale) {
-                            VStack(alignment: .leading, spacing: 3 * scale) {
-                                Text(item.url.lastPathComponent).fontWeight(.medium)
-                                Text(item.provider.rawValue).font(.system(size: 10 * scale)).foregroundStyle(muted)
+            VStack(alignment: .leading, spacing: 12 * scale) {
+                HStack { caption("NOTEBOOKS"); Spacer(); Menu { Button("Open Git folder…", action: openFolder); Button("Clone repository…") { cloning = true } } label: { HStack(spacing: 5 * scale) { OpusIcon(glyph: "\u{f067}", size: 10 * scale); Text("Connect") } }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(git.busy).accessibilityLabel("Connect notebook") }
+                VStack(spacing: 0) {
+                    if git.notebooks.isEmpty {
+                        VStack(spacing: 10 * scale) {
+                            OpusIcon(glyph: "\u{f126}", size: 24 * scale).foregroundStyle(muted.opacity(0.65)).padding(.bottom, 3 * scale)
+                            Text("A shared home for your notes").font(.system(size: 13 * scale, weight: .medium))
+                            Text("Connect a repository to sync notes and tasks.").font(.system(size: 11 * scale)).foregroundStyle(muted)
+                            HStack(spacing: 10 * scale) { action("Open a folder", primary: true, action: openFolder); action("Clone repository") { cloning = true } }.padding(.top, 7 * scale)
+                        }.padding(26 * scale).frame(maxWidth: .infinity)
+                    }
+                    ForEach(git.notebooks) { item in
+                        HStack(spacing: 12 * scale) {
+                            OpusIcon(glyph: "\u{f02d}", size: 18 * scale).foregroundStyle(muted)
+                            VStack(alignment: .leading, spacing: 4 * scale) {
+                                Text(item.url.lastPathComponent).font(.system(size: 12 * scale, weight: .medium))
+                                Text(git.messages[item.path] ?? item.provider.rawValue + " · " + item.path).font(.system(size: 10 * scale)).foregroundStyle(muted).lineLimit(2)
                             }
-                            Spacer(minLength: 0)
-                            Button("Sync") { git.sync(item, notebook: notebook) }.disabled(git.busy)
-                            Menu {
-                                Button("Open notebook") { notebook.loadFolder(item.url) }
-                                Button("Show in Finder") { NSWorkspace.shared.open(item.url) }
-                                Divider()
-                                Button("Disconnect") { git.disconnect(item) }
-                            } label: { OpusIcon(glyph: "\u{f141}", size: 11 * scale) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(git.busy).accessibilityLabel("Options for " + item.url.lastPathComponent)
-                        }
-                        Text(git.messages[item.path] ?? item.path).font(.system(size: 10 * scale)).foregroundStyle(muted).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    }.padding(.vertical, 6 * scale)
-                }
-                Divider().opacity(0.5)
-                Picker("Provider", selection: $provider) { ForEach(GitProvider.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).frame(maxWidth: 230 * scale)
-                TextField("https://github.com/you/notes", text: $address).textFieldStyle(.roundedBorder).accessibilityLabel("Repository HTTPS URL")
-                HStack(spacing: 12 * scale) {
-                    Button("Clone repository…", action: clone).disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || git.busy)
-                    Button("Open Git folder…", action: openFolder).disabled(git.busy)
-                }
-                if !git.message.isEmpty { Text(git.message).font(.system(size: 11 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true) }
-            } footer: {
-                Text("Sync commits and pushes notes and attachments to the connected repository. App preferences stay on this Mac. Conflicting edits are preserved for resolution in Git.").fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            action("Sync") { git.sync(item, notebook: notebook) }.disabled(git.busy)
+                            Menu { Button("Open notebook") { notebook.loadFolder(item.url) }; Button("Show in Finder") { NSWorkspace.shared.open(item.url) }; Divider(); Button("Disconnect") { live.leave(notebook: notebook); git.disconnect(item) } } label: { OpusIcon(glyph: "\u{f141}", size: 12 * scale) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Options for " + item.url.lastPathComponent)
+                        }.padding(16 * scale)
+                        if item.id != git.notebooks.last?.id { line.padding(.leading, 46 * scale) }
+                    }
+                }.background(surface, in: RoundedRectangle(cornerRadius: 8 * scale)).overlay(RoundedRectangle(cornerRadius: 8 * scale).stroke(border, lineWidth: 1))
+                if !git.message.isEmpty { Text(git.message).font(.system(size: 10 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true) }
             }
-        }.onAppear { git.refreshAccounts() }
+            VStack(alignment: .leading, spacing: 12 * scale) {
+                caption("LIVE EDITING")
+                VStack(alignment: .leading, spacing: 16 * scale) {
+                    HStack(alignment: .top, spacing: 12 * scale) {
+                        OpusIcon(glyph: "\u{f0c0}", size: 18 * scale).foregroundStyle(muted).padding(.top, 2 * scale)
+                        VStack(alignment: .leading, spacing: 5 * scale) { Text("Write together").font(.system(size: 13 * scale, weight: .medium)); Text("Live together. Saved on your Mac and in Git.").font(.system(size: 11 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    if let item = selected {
+                        if git.notebooks.count > 1 { Picker("Notebook", selection: $selectedFolder) { ForEach(git.notebooks) { Text($0.url.lastPathComponent).tag($0.path) } }.pickerStyle(.menu) }
+                        VStack(alignment: .leading, spacing: 6 * scale) { Text("Relay address").font(.system(size: 10 * scale)).foregroundStyle(muted); TextField("https://relay.example.com", text: $relay).textFieldStyle(.plain).font(.system(size: 11 * scale)).padding(10 * scale).background(Color(nsColor: Ink.paper), in: RoundedRectangle(cornerRadius: 5 * scale)).overlay(RoundedRectangle(cornerRadius: 5 * scale).stroke(border, lineWidth: 1)).accessibilityLabel("Live relay address") }
+                        HStack { Text(live.status).font(.system(size: 10 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true); Spacer(minLength: 12); if live.configurations.contains(where: { $0.folder == item.path && $0.enabled }) { action("Pause") { live.leave(notebook: notebook); live.configure(item, address: relay, enabled: false, notebook: notebook) } } else { action("Enable", primary: true) { live.configure(item, address: relay, enabled: true, notebook: notebook) } } }
+                    } else { Text("Connect a Git notebook above to get started.").font(.system(size: 11 * scale)).foregroundStyle(muted) }
+                    line
+                    Text("Use a relay you trust. It receives your CLI credential briefly to verify repository write access, then discards it. The relay keeps no files or history. Live edits exist only in memory while someone is connected. Git sync saves notes and shared editing state to your repository.").font(.system(size: 10 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).lineSpacing(2 * scale)
+                    Button("Recovery copies") { live.revealBackups() }.buttonStyle(.plain).font(.system(size: 10 * scale)).foregroundStyle(muted)
+                }.padding(18 * scale).background(surface, in: RoundedRectangle(cornerRadius: 8 * scale)).overlay(RoundedRectangle(cornerRadius: 8 * scale).stroke(border, lineWidth: 1))
+            }
+        }.onAppear { git.refreshAccounts(); selectedFolder = selected?.path ?? ""; relay = live.configurations.first(where: { $0.folder == selectedFolder })?.endpoint ?? "https://omega.naridon.com" }
+        .onChange(of: selectedFolder) { _, value in relay = live.configurations.first(where: { $0.folder == value })?.endpoint ?? "https://omega.naridon.com" }
+        .sheet(isPresented: $cloning) { cloneSheet }
+    }
+    private var surface: Color { Color(nsColor: Ink.sidebar).opacity(0.25) }
+    private var border: Color { Color(nsColor: Ink.separator).opacity(0.75) }
+    private var line: some View { Rectangle().fill(border).frame(height: 1) }
+    private func caption(_ text: String) -> some View { Text(text).font(.system(size: 9 * scale, weight: .medium)).tracking(1.1).foregroundStyle(muted) }
+    private func action(_ title: String, primary: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Text(title).font(.system(size: 11 * scale, weight: .medium)).padding(.horizontal, 12 * scale).padding(.vertical, 7 * scale).background(primary ? Color(nsColor: NotebookTint.lavender.color).opacity(0.16) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5 * scale)) }.buttonStyle(.plain)
+    }
+    private var cloneSheet: some View {
+        VStack(alignment: .leading, spacing: 16 * scale) {
+            Text("Connect a repository").font(.system(size: 18 * scale, weight: .semibold))
+            Text("Choose where its notes will live on this Mac.").font(.system(size: 11 * scale)).foregroundStyle(muted)
+            Picker("Provider", selection: $provider) { ForEach(GitProvider.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().frame(width: 200 * scale)
+            TextField("", text: $address, prompt: Text(verbatim: provider == .github ? "https://github.com/you/notes" : "https://gitlab.com/you/notes")).textFieldStyle(.plain).padding(12 * scale).background(surface, in: RoundedRectangle(cornerRadius: 6 * scale)).overlay(RoundedRectangle(cornerRadius: 6 * scale).stroke(border, lineWidth: 1)).accessibilityLabel("Repository HTTPS URL")
+            HStack { Spacer(); action("Cancel") { cloning = false }; action("Choose folder…", primary: true) { cloning = false; clone() }.disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+        }.padding(24 * scale).frame(width: 350 * scale).background(Color(nsColor: Ink.paper))
     }
     private func openFolder() {
         let panel = NSOpenPanel(); panel.title = "Open Git notebook"; panel.prompt = "Connect"

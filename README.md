@@ -47,7 +47,7 @@ Omega calls the installed `gh` or `glab` credential helper for that host. It doe
 
 Incoming merges are tested in a temporary worktree. Overlapping edits stop with your live files intact and local edits committed. Resolve that conflict with Git, then sync again. There are no force pushes or resets of working files. Staged changes or an unfinished merge/rebase block sync. File changes arriving during synchronization are preserved and may require another sync. A local Git backup reference is kept before accepting incoming changes.
 
-This is file synchronization, **not simultaneous CRDT editing**. Live collaborative editing needs a separate relay/peer transport, shared document identities, durable CRDT state, and repository permission checks. The local assistant integration continues to use revision checks to protect concurrent writes.
+Git sync saves files and their history. Optional live editing shares concurrent changes through a memory-only relay; it requires a connected Git notebook and repository write access. The local assistant integration continues to use revision checks to protect concurrent writes.
 
 ## Build
 
@@ -101,3 +101,11 @@ Shared label colors are stored in `Settings/labels.json` under the app data dire
 ## License
 
 Original code: [Apache License 2.0](LICENSE). Third-party components keep the licenses listed in [NOTICE](NOTICE) and the bundled resource notices.
+
+### Live collaboration
+
+Settings → Git sync now includes **Live editing**. Connect the same Git repository and branch on each Mac, set your trusted relay address, and enable it. Open the same note to write together; the footer shows Live and the people present. Notes, task fields, subtasks, and linked goals merge through Yjs. Local recovery remains active while offline.
+
+The hosted relay for this installation is `https://omega.naridon.com`. It permits repositories under `MHASK` on GitHub and `ashiqwayanad007` on GitLab, with each participant's write permission checked separately. Other deployments can choose their own allowlist. No note is uploaded simply by installing the app.
+
+[Relay setup and trust model](Relay/README.md) includes Docker Compose, HTTPS, access checks, and the zero-persistence model. Git carries notes, attachments, and the shared editing checkpoints under `.omega/live/`. Live editing shares open document contents; the relay never writes them to disk and forgets a room when its last participant leaves. Pause live editing before a Git sync. Live undo is author-local within the session; durable Markdown history stays local.

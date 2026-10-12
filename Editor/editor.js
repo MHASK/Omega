@@ -1,3 +1,4 @@
+import {LiveEditor} from './live-editor.js';
 import {configureLabelColors} from './task-labels.js';
 import { Editor } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
@@ -12,7 +13,7 @@ import { TaskPage, parseTasks } from './task-page.js';
 
 const $ = id => document.getElementById(id);
 const send = (type, data = {}) => window.webkit?.messageHandlers.folio.postMessage({ type, ...data });
-let taskMode = false;
+let taskMode = false, live = null;
 let editor, identity = '', original = '', initialDoc, sourceMode = false, forcedSource = false, loading = false, readOnly = false;
 let slashRange = null, dismissedSlash = null, entryCallback, lastScale = 1, toastTimer;
 const scroller = $('scroller'), bubble = $('bubble'), slash = $('slash'), tableTools = $('table-tools'), source = $('source');
@@ -87,12 +88,13 @@ const slashMenu = new SlashMenu(slash, commandList, icons, runSlash, () => {
 });
 installScrollIndicators();
 function value() {
+ if(live?.kind==='rich')return editor?.getMarkdown()+'\n';
  if(taskMode)return taskPage.raw;
  if (sourceMode) return source.value;
  if (!editor || editor.state.doc.eq(initialDoc)) return original;
  return editor.getMarkdown() + (original.endsWith('\n') || !original ? '\n' : '');
 }
-function emitChange() { if (!loading && !undoHistory.busy) send('change', { id: identity, text: value(), beforeSelection, afterSelection:selectionState(), typing:typingEdit }); typingEdit=false; }
+function emitChange() { if(!loading)live?.changed(value()); if (!loading && !undoHistory.busy) send('change', { id: identity, text: value(), beforeSelection, afterSelection:selectionState(), typing:typingEdit }); typingEdit=false; }
 function cursor() {
  if(taskMode){send('cursor',{id:identity,line:1,column:1});return;}
  if (sourceMode) {
@@ -226,9 +228,9 @@ function keyDown(view,event){
  if(editor.isActive('table')&&event.key==='Enter'&&!event.metaKey){event.preventDefault();editor.commands.goToNextCell();return true;}
  return false;
 }
-function createEditor(text){
+function createEditor(text,shared=null){
  editor?.destroy();$('editor').replaceChildren();
- editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch],...noteContent(text),editable:!readOnly&&!undoHistory.busy,
+ editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch,...(shared?[shared.extension()]:[])],...(shared?{}:noteContent(text)),editable:!readOnly&&!undoHistory.busy,
   editorProps:{attributes:{role:'textbox','aria-label':'Note body','aria-multiline':'true',spellcheck:'true'},handleKeyDown:keyDown,
    handlePaste(view,event){
     const text=event.clipboardData?.getData('text/plain');const html=event.clipboardData?.getData('text/html');
@@ -326,6 +328,7 @@ function find(forward=true){
 $('find-input').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();find(!e.shiftKey);}if(e.key==='Escape'){$('find').hidden=true;editor?.commands.focus();}};$('find-next').onclick=()=>find();$('find-close').onclick=()=>{$('find').hidden=true;editor?.commands.focus();};
 window.folio={
  load(config){
+  if(live){live.destroy();live=null;send('liveStopped');}
   undoHistory.reset();
   clearMatch();loading=true;identity=config.id;original=config.text||'';readOnly=!!config.reading;hideMenus();$('entry').hidden=true;$('find').hidden=true;
   if(!config.source&&parseTasks(original)){taskMode=true;sourceMode=false;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;taskPage.load(original,{identity});this.configure(config);loading=false;cursor();return;}
@@ -346,6 +349,24 @@ window.folio={
   readOnly=!!config.reading;taskPage.setReadOnly(readOnly||undoHistory.busy);source.readOnly=readOnly||undoHistory.busy;editor?.setEditable(!readOnly&&!undoHistory.busy,false);
  },
  snapshot(){return {id:identity,text:value()};},
+ liveStart(config){
+  if(config.id!==identity||live)return false;
+  const host={editor:()=>editor,value,send:(type,data)=>send(type,{id:identity,...data}),composing:()=>editor?.view.composing||taskPage.descriptions.some(e=>e.view?.composing),
+   mount(session){loading=true;hideMenus();sourceMode=session.kind==='source';taskMode=session.kind==='tasks';scroller.hidden=sourceMode||taskMode;source.hidden=!sourceMode;taskPage.element.hidden=!taskMode;$('mode').hidden=true;
+    if(session.kind==='rich')createEditor('',session);else{editor?.destroy();editor=null;if(taskMode)taskPage.load(session.text(),{identity});else source.value=session.text();}loading=false;},
+   refresh(session){
+    loading=true;const active=document.activeElement,field=active?.dataset?.field||active?.getAttribute('aria-label'),from=active?.selectionStart,to=active?.selectionEnd,scroll=scroller.scrollTop;
+    if(taskMode){const viewScroll=taskPage.element.querySelector('.tasks-body,.task-detail-scroller')?.scrollTop||0;taskPage.load(session.text(),{identity});const container=taskPage.element.querySelector('.tasks-body,.task-detail-scroller');if(container)container.scrollTop=viewScroll;
+     if(field){const target=[...taskPage.element.querySelectorAll('textarea,input,[role=textbox]')].find(n=>(n.dataset.field||n.getAttribute('aria-label'))===field);target?.focus({preventScroll:true});if(target?.setSelectionRange&&from!==undefined)target.setSelectionRange(Math.min(from,target.value.length),Math.min(to,target.value.length));}
+    }else{const start=source.selectionStart,end=source.selectionEnd;source.value=session.text();source.setSelectionRange(Math.min(start,source.value.length),Math.min(end,source.value.length));}
+    scroller.scrollTop=scroll;loading=false;
+   }};
+  live=new LiveEditor(host,{...config,kind:taskMode?'tasks':sourceMode?'source':'rich'});
+  if(config.externalText!==undefined){const applied=this.replaceForAssistant({id:identity,expected:value(),text:config.externalText});if(!applied){this.liveStop();send('liveNotice',{message:'This file changed its document format. Live editing is paused; both its local file and shared history are preserved.'});return false;}}return true;
+ },
+ liveMessage(message){live?.receive(message);},
+ liveAccept(){live?.accept();},
+ liveStop(){if(!live)return;const text=value();live.destroy();live=null;this.load({id:identity,text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});},
  linkReady(result){if(result.id!==identity||result.request!==pageRequest?.request)return;if(result.page)finishLink(result.page);else{pageRequest.pending=false;pagePicker.list.textContent=result.error||'This item changed. Close the picker and try again.';}},
  revealItem(config){return config.id===identity&&taskMode&&taskPage.revealItem(config.item,config.kind);},
  pageResults(result){if(result.id===identity&&result.request===pageRequest?.request&&!pagePicker.element.hidden){pagePicker.setPages(result.pages||[]);const rect=pageRequest.rect;place(pagePicker.element,rect.left,rect.bottom);if(rect.bottom+pagePicker.element.offsetHeight+8>innerHeight)place(pagePicker.element,rect.left,rect.top,true);}},
@@ -353,6 +374,8 @@ window.folio={
  replaceForAssistant(config){
   if(config.id!==identity || config.expected!==value() || taskPage.busy || undoHistory.busy || editor?.view.composing || !$('entry').hidden || !pagePicker.element.hidden)return false;
   // Compare and replace in one JavaScript turn. A keystroke cannot land between them.
+  if(live?.kind==='rich'){try{const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),current=editor.state.doc,start=current.content.findDiffStart(next.content);if(start!==null){const end=current.content.findDiffEnd(next.content);let a=end.a,b=end.b;if(a<start){b+=start-a;a=start;}if(b<start){a+=start-b;b=start;}editor.view.dispatch(editor.state.tr.replace(start,a,next.slice(start,b)));}return true;}catch{return false;}}
+  if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
   const scroll=scroller.scrollTop, sourceScroll=source.scrollTop;
   const selection=editor?.state.selection.from || 1;
   if(taskMode || parseTasks(config.text) || sourceMode || needsSource(config.text)){
@@ -368,12 +391,14 @@ window.folio={
  focus(){if(taskMode){taskPage.element.querySelector('.tasks-title')?.focus();return;}sourceMode?source.focus():editor?.commands.focus();},
  insertImage(path){if(!sourceMode)editor.chain().focus().setImage({src:path,alt:path.split('/').at(-1).replace(/\.[^.]+$/,'')}).run();},
  command(name){
+  if((name==='undo'||name==='redo')&&live){if(!readOnly&&!editor?.view.composing)live.undoChange(name==='redo');return;}
   if(name==='undo'||name==='redo'){
    if(taskMode&&taskPage.composer&&!taskPage.composer.inserted){document.execCommand(name);return;}
    if(!taskMode&&document.activeElement?.matches('input,textarea')&&document.activeElement!==source){document.execCommand(name);return;}
    if(!readOnly&&!editor?.view.composing)undoHistory.request(name==='redo');return;
   }
   if(name==='find'){$('find').hidden=false;$('find-input').focus();return;}
+  if(name==='source'&&live){send('liveNotice',{message:'Leave live editing before switching document formats.'});return;}
   if(name==='source'){
     const text=value();if(sourceMode&&needsSource(text)&&!parseTasks(text)){$('toast').textContent='Extended Markdown · source view';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,2200);return;}
     const wasSource=sourceMode;this.load({id:identity,text,source:!wasSource,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});this.focus();return;

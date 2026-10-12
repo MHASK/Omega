@@ -62,12 +62,14 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors]
         guard let data = try? JSONSerialization.data(withJSONObject: config), let json = String(data: data, encoding: .utf8) else { return }
         if loadedID != identity {
+            LiveCollaboration.shared.stop()
             loadedID = identity; loadedReadyID = ""; lastConfiguration = settings
             let requestedID = identity
             webView.evaluateJavaScript("window.folio.load(\(json))") { [weak self] _, error in
                 if let error { self?.notebook?.showError(error) }
                 else if let self, self.identity == requestedID {
                     self.loadedReadyID = requestedID
+                    LiveCollaboration.shared.prepare(self)
                     self.revealItemPending()
                     if self.notebook?.searchReveal != nil { self.revealPending() }
                     else if self.notebook?.text.isEmpty == true { self.focus() }
@@ -135,6 +137,8 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any], let type = body["type"] as? String, let notebook else { return }
         switch type {
+        case "liveReady", "liveCheckpoint", "liveConflict": LiveCollaboration.shared.handle(body, editor: self)
+        case "liveNotice": notebook.showMessage(body["message"] as? String ?? "Live editing is active")
         case "ready": ready = true; update()
         case "change":
             if body["id"] as? String == identity, let text = body["text"] as? String, text != notebook.text {
@@ -260,6 +264,7 @@ struct RichEditor: NSViewRepresentable {
         CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
     }
     static func dismantleNSView(_ view: WKWebView, coordinator: EditorBridge) {
+        LiveCollaboration.shared.stop()
         view.configuration.userContentController.removeScriptMessageHandler(forName: "folio")
         if coordinator.notebook?.richEditor === coordinator { coordinator.notebook?.richEditor = nil }
     }

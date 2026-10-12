@@ -56,7 +56,7 @@ struct GitRunner {
         let directories = ["/opt/homebrew/bin", "/usr/local/bin", home + "/.local/bin", "/usr/bin"] + (ProcessInfo.processInfo.environment["PATH"] ?? "").components(separatedBy: ":")
         return directories.map { URL(fileURLWithPath: $0).appendingPathComponent(name) }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
-    func run(_ args: [String], in directory: URL, environment: [String: String] = [:], allowFailure: Bool = false) throws -> Output {
+    func run(_ args: [String], in directory: URL, environment: [String: String] = [:], allowFailure: Bool = false, input: String? = nil) throws -> Output {
         let process = Process(), pipe = Pipe()
         process.executableURL = executable; process.arguments = args; process.currentDirectoryURL = directory
         var env = ProcessInfo.processInfo.environment
@@ -65,10 +65,12 @@ struct GitRunner {
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         env["GIT_TERMINAL_PROMPT"] = "0"; env["GCM_INTERACTIVE"] = "never"; env["GH_PROMPT_DISABLED"] = "1"; env["GLAB_CHECK_UPDATE"] = "false"
         env["LC_ALL"] = "C"; env.merge(environment, uniquingKeysWith: { _, new in new })
-        process.environment = env; process.standardInput = FileHandle.nullDevice
+        let stdin = input == nil ? nil : Pipe()
+        process.environment = env; process.standardInput = stdin ?? FileHandle.nullDevice
         process.standardOutput = pipe; process.standardError = pipe
         let timeoutWork = DispatchWorkItem { if process.isRunning { process.terminate() } }
         try process.run()
+        if let input, let stdin { stdin.fileHandleForWriting.write(Data(input.utf8)); try? stdin.fileHandleForWriting.close() }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit(); timeoutWork.cancel()
@@ -108,9 +110,10 @@ struct GitRunner {
         _ = try git(["clone", "--", remote.url, destination.path], at: destination.deletingLastPathComponent(), credentials: credentials)
     }
 
-    // Only Markdown/text and image attachments are automatically committed.
+    // Markdown/text, attachments, and narrowly scoped shared editing checkpoints are committed.
     // Hidden files, code, secrets, and any unrelated staged work stay out of sync.
     static func isNotePath(_ path: String) -> Bool {
+        if path.range(of: "^\\.omega/live/[a-f0-9]{64}\\.json$", options: .regularExpression) != nil { return true }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         return !parts.isEmpty && parts.allSatisfy { !$0.isEmpty && !$0.hasPrefix(".") } &&
             ["md", "markdown", "txt", "png", "jpg", "jpeg", "gif", "webp", "svg", "heic", "pdf"].contains(URL(fileURLWithPath: path).pathExtension.lowercased())

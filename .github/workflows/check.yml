@@ -16,6 +16,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: Editor/package-lock.json
+      - run: npm ci --prefix Relay
+      - run: npm test --prefix Relay
       - run: npm ci --prefix Editor
       - run: npm test --prefix Editor
       - run: npm run build --prefix Editor
@@ -23,5 +25,7 @@ jobs:
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --self-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --mcp-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'
-      - run: xcrun swiftc GitSync.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"
+      - run: xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"
       - run: '"$RUNNER_TEMP/GitSyncCheck"'
+      - run: xcrun swiftc -parse-as-library Tests/WebLiveCheck.swift -o "$RUNNER_TEMP/WebLiveCheck" -framework AppKit -framework WebKit
+      - run: '"$RUNNER_TEMP/WebLiveCheck" "$PWD/Resources"'

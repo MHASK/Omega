@@ -1,0 +1,30 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      OMEGA_ALLOWED_REPOS: ${OMEGA_ALLOWED_REPOS:?Set allowed provider:owner/repository entries}
+    expose:
+      - "8787"
+    mem_limit: 512m
+    memswap_limit: 512m
+    ulimits:
+      core: 0
+    cpus: 1
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      OMEGA_DOMAIN: ${OMEGA_DOMAIN:?Set your relay domain}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy_config:/config
+volumes:
+  certificates:
+  caddy_config:

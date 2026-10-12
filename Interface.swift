@@ -378,6 +378,7 @@ struct FolioView: View {
         let narrow = width / scale < 300
         return Group {
                 HStack(spacing: 10 * scale) {
+                    LiveStatusView(notebook: notebook)
                     if !compact { Text("\(notebook.cursorLine):\(notebook.cursorColumn)").frame(maxWidth: .infinity, alignment: .leading) }
                     Text(narrow ? "\(NoteFiles.wordCount(notebook.text))W" : "\(notebook.lineCount)L \(NoteFiles.wordCount(notebook.text))W")
                         .fixedSize(horizontal: true, vertical: false)

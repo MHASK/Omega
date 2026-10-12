@@ -40,6 +40,18 @@ import Foundation
         _ = try git.sync(second, credentials: [])
         _ = try git.sync(first, credentials: [])
         try expect(try content(first, "Other.md") == "# A teammate's note\n", "Fast-forward pulls should update notes")
+        // The shared editing baseline belongs to Git, not to the relay.
+        let liveFile = try LiveCheckpointStore.file(root: first, note: "Welcome.md")
+        let checkpoint = LiveCheckpoint(state: "synthetic-yjs-state", text: "# Welcome\n\nSafe local notes.\n", accepted: true)
+        try LiveCheckpointStore.write(checkpoint, to: liveFile, root: first)
+        _ = try git.sync(first, credentials: []); _ = try git.sync(second, credentials: [])
+        let peerFile = try LiveCheckpointStore.file(root: second, note: "Welcome.md")
+        try expect(try LiveCheckpointStore.read(peerFile)?.state == checkpoint.state, "Git must carry the shared editing baseline")
+        try expect(!GitRunner.isNotePath(".omega/private.json") && !GitRunner.isNotePath(".omega/live/token.json"), "Unrelated hidden files remain excluded")
+        let trap = temp.appendingPathComponent("trap")
+        try fm.createDirectory(at: trap, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: trap.appendingPathComponent(".omega"), withDestinationURL: first.appendingPathComponent(".omega"))
+        try rejected("Symlinks must not redirect checkpoints") { _ = try LiveCheckpointStore.file(root: trap, note: "Welcome.md") }
         // Independent edits on both machines merge, rather than requiring a manual rebase.
         try write(first, "One.md", "First collaborator\n")
         try write(second, "Two.md", "Second collaborator\n")

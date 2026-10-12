@@ -376,3 +376,5 @@ assert.equal(pageRing().dataset.progress,'1');
 projectView.load(taskMarker+'\n# Empty\n\n## Goals\n\n## To do\n\n## In progress\n\n## Done\n');
 assert.equal(pageRing().dataset.progress,'0');assert.equal(pageRing().title,'No tasks yet');
 console.log('PASS: whole-project progress counts every saved task/subtask once, omits drafts/goals, respects custom statuses and stays current after edits, moves and refresh.');
+import {testLive} from './live-test.mjs';
+testLive();

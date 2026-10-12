@@ -800,6 +800,16 @@ final class Notebook: ObservableObject {
         reloadTree()
         guard let selected else { return }
         if let current = try? String(contentsOf: selected, encoding: .utf8), current != diskText {
+            if let editor = richEditor, LiveCollaboration.shared.isSharing(editor) {
+                // Import an external/assistant edit as a granular shared transaction.
+                // Recheck identity and disk contents when the web view replies.
+                let expected = text
+                editor.replaceForAssistant(expected: expected, text: current) { [weak self] result in
+                    guard let self, self.selected == selected, (try? String(contentsOf: selected, encoding: .utf8)) == current else { return }
+                    if case .success = result { self.diskText = current; self.dirty = self.text != current; if !self.dirty { self.recovery.clear(selected) } }
+                }
+                return
+            }
             observeHistory(current, at: selected)
             text = current; diskText = current; revision = UUID(); status = "Updated from disk"
         } else if !FileManager.default.fileExists(atPath: selected.path) {

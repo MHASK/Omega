@@ -10,3 +10,5 @@ Editor/.folio-tests.cjs
 *.p8
 *.mobileprovision
 .env*
+Relay/node_modules/
+Relay/data/
