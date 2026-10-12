@@ -1,14 +1,16 @@
 import {taskIcon} from './task-icons.js';
+import {completionRing} from './completion-ring.js';
 import {walkTasks,goalProgress,linkGoal,removeGoal} from './task-model.js';
 const el=(tag,cls='',text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
 const btn=(text,label,action,cls='',icon)=>{const n=el('button',cls);n.type='button';n.setAttribute('aria-label',label);n.title=label;if(icon)n.append(taskIcon(icon));if(text)n.append(el('span','',text));n.onclick=action;return n;};
 const mutate=n=>{n.dataset.mutates='true';return n;};
 const name=g=>g.title||'Untitled goal';
 const summary=p=>p.total?`${p.completed}/${p.total}`:'No linked tasks';
-function progress(g,model){const p=goalProgress(model,g),wrap=el('span','goal-progress');wrap.setAttribute('aria-label',p.total?`${p.completed} of ${p.total} linked items complete`:summary(p));if(p.total){const track=el('span','goal-progress-track'),fill=el('span');fill.style.width=(p.completed/p.total*100)+'%';track.append(fill);wrap.append(track);}wrap.append(el('span','',summary(p)));return wrap;}
+function goalRing(g,model,decorative=false){const p=goalProgress(model,g);return completionRing(p.total?p.completed:Number(p.done),p.total||1,{label:p.total?`${p.completed} of ${p.total} linked items complete`:(p.done?'Goal completed':'Goal not completed'),decorative});}
+function progress(g,model){const p=goalProgress(model,g),wrap=el('span','goal-progress');wrap.append(goalRing(g,model),el('span','',summary(p)));return wrap;}
 export function goalBadge(view,item){
  const goals=view.model.goals.filter(g=>g.details.id&&(item.details.goals||[]).includes(g.details.id));if(!goals.length)return null;
- const g=goals[0],badge=btn(name(g)+(goals.length>1?` +${goals.length-1}`:''),'Open goal: '+name(g),()=>view.openGoal(g),'task-goal-badge','goal');badge.title=goals.map(g=>name(g)+' · '+summary(goalProgress(view.model,g))).join('\n');return badge;
+ const g=goals[0],badge=btn(name(g)+(goals.length>1?` +${goals.length-1}`:''),'Open goal: '+name(g),()=>view.openGoal(g),'task-goal-badge');badge.prepend(goalRing(g,view.model,true));badge.title=goals.map(g=>name(g)+' · '+summary(goalProgress(view.model,g))).join('\n');badge.setAttribute('aria-label','Open goal: '+name(g)+' · '+summary(goalProgress(view.model,g)));return badge;
 }
 // Shared compact picker for both task details and the new-task composer.
 export function goalPicker(view,container,item,onChange){

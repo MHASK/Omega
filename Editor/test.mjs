@@ -248,7 +248,7 @@ assert.equal(parseTasks(customView.raw).tasks.find(t=>t.title==='Draft').status,
 console.log('PASS: custom status/complete marker roundtrip, unknown metadata fallback, invalid dates, duplicate/reserved names, custom completion and reopen behavior.');
 
 // A move is a single model mutation, preserving the full tree and every field.
-import {reparentTask,walkTasks} from './task-model.js';
+import {reparentTask,walkTasks,subtaskStatus} from './task-model.js';
 const moving=parseTasks(serializeTasks(taskView.model));
 const movingTask=moving.tasks.find(t=>t.title==='Renamed task'),target=moving.tasks.find(t=>t!==movingTask);
 const snapshot=structuredClone(movingTask),targetID=target.id;
@@ -320,3 +320,38 @@ labelView.view='list';labelView.detail=null;labelView.render();
 assert.equal(labelDOM.querySelector('.task-row-labels [data-label-name="claude"]').dataset.labelTone,'1');
 configureLabelColors({});assert.equal(labelView.raw,beforeCustomColor);
 console.log('PASS: label color preferences update existing controls and newly rendered tags without editing Markdown.');
+
+// Progress is derived, so viewing a ring never adds metadata or an undo step.
+import {completionRing,taskCompletion} from './completion-ring.js';
+const ringDOM=document.createElement('div');document.body.append(ringDOM);let ringChanges=0;
+const ringView=new TaskPage(ringDOM,()=>ringChanges++);ringView.load(tasksSource);
+const ringParent=ringView.model.tasks[0],ringChild=ringParent.children[1];
+const ringValue=selector=>ringDOM.querySelector(selector+' .completion-ring').dataset.progress;
+assert.equal(ringValue('.task-row-progress'),'0.5');
+assert.equal(taskCompletion(ringView.model,ringParent).label,'1 of 2 subtasks complete');
+for(const entry of walkTasks(ringView.model).filter(e=>!e.item.children.length)){
+ const p=taskCompletion(ringView.model,entry.item,entry.parent);
+ assert.equal(p.completed,(entry.parent?subtaskStatus(ringView.model,entry.item):entry.item.status)===2?1:0);
+ assert.equal(p.total,1);
+}
+ringView.setView('board');assert.equal(ringValue('.task-progress'),'0.5');
+ringView.openDetail(ringParent);assert.equal(ringValue('.task-detail-actions'),'0.5');assert.equal(ringValue('.task-subtasks-label'),'0.5');
+assert.equal(ringChanges,0);assert.equal(ringView.raw,tasksSource);
+ringView.move(ringChild,2,ringParent);assert.equal(ringValue('.task-detail-actions'),'1');
+ringView.move(ringParent.children[0],0,ringParent);assert.equal(ringValue('.task-detail-actions'),'0.5');
+ringView.move(ringChild,0,ringParent);assert.equal(ringValue('.task-detail-actions'),'0');
+ringView.load(tasksSource);assert.equal(ringValue('.task-detail-actions'),'0.5','external refresh restores derived progress');
+const rg=ringView.model.goals[0],rp=ringView.model.tasks[0];
+linkGoal(ringView.model,rp,rg,true);linkGoal(ringView.model,rp.children[0],rg,true);ringView.change();
+ringView.openGoal(rg);assert.equal(ringValue('.goal-progress'),'0.5');
+ringView.openGoals();assert.equal(ringValue('.goal-overview-row'),'0.5');
+ringView.closeDetail();assert.equal(ringValue('.task-goal-badge'),'0.5');
+ringView.move(rp,2);ringView.openGoal(rg);assert.equal(ringValue('.goal-progress'),'1');
+linkGoal(ringView.model,rp,rg,false);linkGoal(ringView.model,rp.children[0],rg,false);rg.done=false;ringView.change(true);
+assert.equal(ringValue('.goal-progress'),'0');ringDOM.querySelector('[aria-label="Complete unlinked goal"]').click();assert.equal(ringValue('.goal-progress'),'1');
+const customParent=custom.tasks.find(t=>t.title==='Check');assert.equal(taskCompletion(custom,customParent).completed,1);
+assert.equal(taskCompletion(custom,custom.tasks.find(t=>t.title==='Plan')).completed,1);
+assert.equal(completionRing(0,0).dataset.progress,'0');assert.equal(completionRing(10,2).dataset.progress,'1');
+assert.equal(completionRing(1,2,{label:'1 of 2 subtasks complete'}).getAttribute('aria-valuenow'),'50');
+assert.equal(completionRing(0,2).querySelector('.completion-ring-fill').getAttribute('visibility'),'hidden','zero progress must not render a round-cap dot');
+console.log('PASS: goal/task rings show empty, partial and complete progress across list, board, details and linked goal badges; custom statuses, unlinked goals, external refresh and unchanged files.');
