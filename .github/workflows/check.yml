@@ -1,0 +1,25 @@
+name: Check Omega
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Editor/package-lock.json
+      - run: npm ci --prefix Editor
+      - run: npm test --prefix Editor
+      - run: npm run build --prefix Editor
+      - run: ./build.sh "$RUNNER_TEMP/Omega.app"
+      - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --self-test'
+      - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --mcp-test'
+      - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'

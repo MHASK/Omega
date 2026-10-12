@@ -1,0 +1,11 @@
+Omega
+Copyright 2026 Omega contributors
+
+Omega's original application code is licensed under Apache License 2.0.
+Bundled dependencies retain their own licenses:
+- Editor packages: Resources/Third-Party-Notices.txt (MIT and BSD-3-Clause)
+- Font Awesome Free fonts: Resources/Font-Awesome-LICENSE.txt (SIL OFL 1.1)
+- Font Awesome icons: CC BY 4.0, as described in that notice
+
+The Omega icon was generated for this project. Product and third-party names
+remain the trademarks of their respective owners.

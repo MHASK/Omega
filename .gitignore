@@ -1,0 +1,12 @@
+.DS_Store
+*.app/
+*.zip
+*.sha256
+build/
+release/
+Editor/node_modules/
+Editor/.folio-tests.cjs
+*.p12
+*.p8
+*.mobileprovision
+.env*
