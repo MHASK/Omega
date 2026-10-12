@@ -3,7 +3,7 @@ set -euo pipefail
 cd "${0:A:h}"
 APP="${1:-../Omega.app}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-xcrun swiftc -O -whole-module-optimization -target arm64-apple-macosx14.0 Core.swift Recovery.swift UndoHistory.swift UndoTests.swift Store.swift Markdown.swift RichEditor.swift Search.swift SearchTests.swift Assistant.swift AssistantTests.swift Interface.swift Settings.swift Labels.swift LabelsTests.swift SettingsLabels.swift SettingsCard.swift Updates.swift AutoUpdates.swift SettingsUpdates.swift App.swift -o "$APP/Contents/MacOS/Folio" -framework AppKit -framework SwiftUI -framework UniformTypeIdentifiers -framework WebKit -lsqlite3
+xcrun swiftc -O -whole-module-optimization -target arm64-apple-macosx14.0 Core.swift Recovery.swift UndoHistory.swift UndoTests.swift Store.swift Markdown.swift RichEditor.swift Search.swift SearchTests.swift Assistant.swift AssistantTests.swift Interface.swift Archive.swift GitSync.swift SettingsGit.swift Settings.swift Labels.swift LabelsTests.swift SettingsLabels.swift SettingsCard.swift Updates.swift AutoUpdates.swift SettingsUpdates.swift App.swift -o "$APP/Contents/MacOS/Folio" -framework AppKit -framework SwiftUI -framework UniformTypeIdentifiers -framework WebKit -lsqlite3
 cp -R Resources/. "$APP/Contents/Resources/"
 cp LICENSE NOTICE "$APP/Contents/Resources/"
 cp Info.plist "$APP/Contents/Info.plist"

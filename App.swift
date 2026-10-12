@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowDidFailToEnterFullScreen(_ window: NSWindow) { notebook.fullscreen = false }
     func windowDidFailToExitFullScreen(_ window: NSWindow) { notebook.fullscreen = true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if notebook.gitSyncing { return .terminateCancel }
         if updating { return .terminateNow }
         guard let editor = notebook.richEditor else { return notebook.save() ? .terminateNow : .terminateCancel }
         editor.synchronize { success in sender.reply(toApplicationShouldTerminate: success && self.notebook.save()) }

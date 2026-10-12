@@ -7,10 +7,10 @@ private struct StatusDraft: Identifiable {
     var name: String
 }
 private enum SettingsSection: String, CaseIterable, Identifiable {
-    case appearance = "Appearance", tasks = "Tasks & goals", labels = "Labels", storage = "Notes & storage", assistants = "Assistants", about = "About Omega"
+    case appearance = "Appearance", tasks = "Tasks & goals", labels = "Labels", storage = "Notes & storage", assistants = "Assistants", git = "Git sync", about = "About Omega"
     var id: String { rawValue }
     var glyph: String {
-        switch self { case .appearance: return "\u{f042}"; case .tasks: return "\u{f0ae}"; case .labels: return "\u{f02b}"; case .storage: return "\u{f07b}"; case .assistants: return "\u{f0c1}"; case .about: return "\u{f05a}" }
+        switch self { case .appearance: return "\u{f042}"; case .tasks: return "\u{f0ae}"; case .labels: return "\u{f02b}"; case .storage: return "\u{f07b}"; case .assistants: return "\u{f0c1}"; case .git: return "\u{f126}"; case .about: return "\u{f05a}" }
     }
     var subtitle: String {
         switch self {
@@ -19,6 +19,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .labels: return "A shared set of labels, quietly organized."
         case .storage: return "Your words stay in your own folders."
         case .assistants: return "Work alongside your local tools."
+        case .git: return "Your notes, with a shared history."
         case .about: return "A quiet place for your words."
         }
     }
@@ -62,7 +63,7 @@ struct FolioSettingsView: View {
                         Text(section.rawValue).lineLimit(1)
                         }
                         Spacer(minLength: 4)
-                        Button("Done") { leave() }.buttonStyle(.plain).foregroundStyle(muted).accessibilityLabel("Close settings")
+                        Button(notebook.gitSyncing ? "Syncing…" : "Done") { leave() }.buttonStyle(.plain).foregroundStyle(muted).accessibilityLabel("Close settings")
                     }
                     .font(.system(size: 11 * scale)).padding(.horizontal, compact ? 14 : 24 * scale)
                     .padding(.top, geometry.size.width < 520 && !notebook.fullscreen ? 30 : 0)
@@ -85,6 +86,7 @@ struct FolioSettingsView: View {
         }
         .font(.system(size: 12 * scale)).foregroundStyle(Color(nsColor: Ink.text)).tint(accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea()
+        .disabled(notebook.gitSyncing)
         .onReceive(NotificationCenter.default.publisher(for: .init("OmegaShowUpdateSettings"))) { _ in section = .about }
         .onExitCommand { leave() }
         .alert("Discard status changes?", isPresented: $confirmingDiscard) {
@@ -104,7 +106,7 @@ struct FolioSettingsView: View {
         }
     }
     private func close() { notebook.showingSettings = false; DispatchQueue.main.async { notebook.richEditor?.focus() } }
-    private func leave() { if changes { closeAfterDiscard = true; confirmingDiscard = true } else { close() } }
+    private func leave() { if notebook.gitSyncing { return }; if changes { closeAfterDiscard = true; confirmingDiscard = true } else { close() } }
     private func navigation(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
@@ -145,6 +147,7 @@ struct FolioSettingsView: View {
         case .labels: SettingsLabelsView(notebook: notebook)
         case .storage: storageCards
         case .assistants: assistantCards
+        case .git: SettingsGitView(notebook: notebook)
         case .about: aboutCards
         }
     }

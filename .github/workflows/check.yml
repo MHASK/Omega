@@ -23,3 +23,5 @@ jobs:
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --self-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --mcp-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'
+      - run: xcrun swiftc GitSync.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"
+      - run: '"$RUNNER_TEMP/GitSyncCheck"'

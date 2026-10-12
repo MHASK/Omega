@@ -164,6 +164,7 @@ final class Notebook: ObservableObject {
     @Published var query = ""
     var settingsDestination: String?
     @Published var showingSettings = false
+    @Published var gitSyncing = false
     @Published var searching = false
     @Published var searchReveal: SearchReveal?
     @Published var cursorLine = 1
@@ -241,6 +242,7 @@ final class Notebook: ObservableObject {
     }
 
     func afterSync(_ action: @escaping () -> Void) {
+        guard !gitSyncing else { return }
         if let richEditor { richEditor.synchronize { success in if success { action() } } }
         else { action() }
     }
@@ -793,7 +795,7 @@ final class Notebook: ObservableObject {
     }
 
     func refreshFromDisk() {
-        guard !checking, !dirty else { return }
+        guard !checking, !dirty, !gitSyncing else { return }
         checking = true; defer { checking = false }
         reloadTree()
         guard let selected else { return }
@@ -809,6 +811,7 @@ final class Notebook: ObservableObject {
     // Assistant requests run on the main actor, after the editor has synchronized.
     // Never show a modal conflict dialog or replace a divergent on-disk version.
     func prepareAssistantAccess() throws {
+        guard !gitSyncing else { throw AssistantError("This notebook is syncing with Git. Retry shortly.") }
         guard !loading else { throw AssistantError("Omega is opening a notebook. Retry shortly.") }
         if dirty, let selected {
             guard (try? String(contentsOf: selected, encoding: .utf8)) == diskText else {

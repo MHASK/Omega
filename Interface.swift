@@ -118,6 +118,7 @@ struct FolioView: View {
     @ObservedObject private var updater = GitHubUpdater.shared
     @StateObject private var noteSearch = NoteSearchModel()
     @State private var sidebarToggleHovered = false
+    @State private var showingArchive = false
     var scale: CGFloat { CGFloat(notebook.zoom) }
     var toolbarScale: CGFloat { min(scale, 1.5) }
     var headerHeight: CGFloat { min(40 * scale, 56) }
@@ -271,17 +272,27 @@ struct FolioView: View {
             .allowsHitTesting(false)
     }
     var sidebarSearchBar: some View {
-        Button(action: openSearch) {
-            HStack(spacing: 8 * scale) {
-                OpusIcon(glyph: "\u{f002}", size: 10 * scale)
-                Text("Search notes").font(.system(size: 12 * scale)).lineLimit(1)
-                Spacer(minLength: 0)
-                Text("⌘K").font(.system(size: 10 * scale, design: .monospaced))
-            }.foregroundStyle(Color(nsColor: Ink.muted))
-                .padding(.horizontal, 12 * scale)
+        HStack(spacing: 0) {
+            Button(action: openSearch) {
+                HStack(spacing: 8 * scale) {
+                    OpusIcon(glyph: "\u{f002}", size: 10 * scale)
+                    Text("Search notes").font(.system(size: 12 * scale)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("⌘K").font(.system(size: 10 * scale, design: .monospaced))
+                }
+                .padding(.leading, 12 * scale).padding(.trailing, 5 * scale)
                 .frame(maxWidth: .infinity).frame(height: footerHeight)
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel("Search all notes, Command K")
+            }.buttonStyle(.plain).accessibilityLabel("Search all notes, Command K")
+            Button { showingArchive.toggle() } label: {
+                OpusIcon(glyph: "\u{f187}", size: 11 * scale)
+                    .frame(width: 30 * scale, height: footerHeight).contentShape(Rectangle())
+            }.buttonStyle(.plain).padding(.trailing, 5 * scale)
+                .help("Archived notes and folders").accessibilityLabel("Show archived items")
+                .popover(isPresented: $showingArchive, arrowEdge: .top) {
+                    ArchiveBrowser(notebook: notebook) { showingArchive = false }
+                }
+        }.foregroundStyle(Color(nsColor: Ink.muted))
             .overlay(alignment: .top) {
                 Rectangle().fill(Color(nsColor: Ink.separator)).frame(height: 1)
                     .allowsHitTesting(false).accessibilityHidden(true)
