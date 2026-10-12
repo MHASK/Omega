@@ -355,3 +355,24 @@ assert.equal(completionRing(0,0).dataset.progress,'0');assert.equal(completionRi
 assert.equal(completionRing(1,2,{label:'1 of 2 subtasks complete'}).getAttribute('aria-valuenow'),'50');
 assert.equal(completionRing(0,2).querySelector('.completion-ring-fill').getAttribute('visibility'),'hidden','zero progress must not render a round-cap dot');
 console.log('PASS: goal/task rings show empty, partial and complete progress across list, board, details and linked goal badges; custom statuses, unlinked goals, external refresh and unchanged files.');
+
+import {projectCompletion} from './completion-ring.js';
+const projectDOM=document.createElement('div');document.body.append(projectDOM);let projectChanges=0;
+const projectView=new TaskPage(projectDOM,()=>projectChanges++);projectView.load(tasksSource);
+const pageRing=()=>projectDOM.querySelector('.tasks-heading .completion-ring');
+assert.equal(pageRing().dataset.progress,'0.4');assert.equal(pageRing().title,'40% complete · 2 of 5 tasks and subtasks complete');
+projectView.toggleList(projectView.model.tasks[0]);projectView.setView('board');
+assert.equal(pageRing().dataset.progress,'0.4');assert.equal(projectChanges,0);assert.equal(projectView.raw,tasksSource);
+const projectParent=projectView.model.tasks[0];projectView.move(projectParent.children[1],2,projectParent);
+assert.equal(pageRing().dataset.progress,'0.6');
+projectView.load(tasksSource);assert.equal(pageRing().dataset.progress,'0.4');
+const projectModel=parseTasks(tasksSource);projectModel.tasks.push({title:'Saved draft',status:2,details:{draft:true},children:[{title:'Draft child',done:true,details:{},children:[]}]});
+assert.equal(projectCompletion(projectModel).total,5);assert.equal(projectCompletion(projectModel).completed,2);
+const beforeProjectMove=projectCompletion(projectModel);reparentTask(projectModel,projectModel.tasks[0].children[0].id,null);
+assert.deepEqual(projectCompletion(projectModel),beforeProjectMove,'promotion preserves the project count');
+assert.equal(projectCompletion(custom).completed,2);assert.equal(projectCompletion(custom).total,4);
+for(const {item,parent} of walkTasks(projectView.model))projectView.move(item,2,parent);
+assert.equal(pageRing().dataset.progress,'1');
+projectView.load(taskMarker+'\n# Empty\n\n## Goals\n\n## To do\n\n## In progress\n\n## Done\n');
+assert.equal(pageRing().dataset.progress,'0');assert.equal(pageRing().title,'No tasks yet');
+console.log('PASS: whole-project progress counts every saved task/subtask once, omits drafts/goals, respects custom statuses and stays current after edits, moves and refresh.');

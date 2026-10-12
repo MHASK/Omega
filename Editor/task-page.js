@@ -1,5 +1,5 @@
 import {labelChip,applyLabelTone} from './task-labels.js';
-import {taskCompletion,taskCompletionRing} from './completion-ring.js';
+import {completionRing,projectCompletion,taskCompletion,taskCompletionRing} from './completion-ring.js';
 import {goalPicker,goalBadge,renderGoals,renderGoal} from './task-goals.js';
 import { descriptionEditor } from './task-description.js';
 import { taskIcon } from './task-icons.js';
@@ -70,7 +70,8 @@ export class TaskPage {
   this.setReadOnly(this.readOnly);this.resizeFields();
  }
  renderOverview(root){
-  const header=el('header','tasks-header');header.append(this.textField(this.model,'title','Task page title','tasks-title',()=>this.change(false,true)));
+  const header=el('header','tasks-header'),heading=el('div','tasks-heading'),p=projectCompletion(this.model),ring=completionRing(p.completed,p.total,{label:p.label});ring.classList.add('tasks-page-progress');
+  heading.append(ring,this.textField(this.model,'title','Task page title','tasks-title',()=>this.change(false,true)));header.append(heading);
   const controls=el('div','tasks-controls'),tabs=el('div','tasks-tabs');tabs.setAttribute('role','tablist');
   for(const view of ['list','board']){const tab=button(view==='list'?'List':'Board',view==='list'?'List view':'Board view',()=>this.setView(view),this.view===view?'active':'',view);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(this.view===view));tabs.append(tab);}
   const actions=el('div','tasks-actions');actions.append(button('Goals'+(this.model.goals.length?' · '+this.model.goals.length:''),'Manage goals',()=>this.openGoals(),'task-goals-trigger','goal'));this.addMenu(actions);controls.append(tabs,actions);header.append(controls);root.append(header);

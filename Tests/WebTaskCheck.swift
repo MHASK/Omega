@@ -97,6 +97,7 @@ final class ResourceFiles: NSObject, WKURLSchemeHandler {
             _=try await js("window.folio.configure({theme:'dark',zoom:1.4,accent:'#c7b6e6'});true")
             try await assertJS("!document.querySelector('#task-page').hidden&&document.querySelectorAll('.task-list-row').length===3", "compact lists begin with one row per main task")
             guard current==text else {throw UndoHistory.Failure(message:"Opening tasks changed the file")}
+            try await assertJS("document.querySelector('.tasks-page-progress').dataset.progress===String(1/6)", "the title ring measures the complete project before subtasks are expanded")
             try await assertJS("(()=>{const labels=[...document.querySelectorAll('.task-row-labels .task-label[data-label-tone]')];return labels.length>1&&labels.every(l=>getComputedStyle(l).textTransform==='uppercase')&&new Set(labels.map(l=>getComputedStyle(l).color)).size>1})()", "list tags render uppercase with distinct pastel colors")
             try await assertJS("(()=>{let h=document.querySelector('.tasks-header').getBoundingClientRect(),g=document.querySelector('.task-groups').getBoundingClientRect(),t=document.querySelector('.tasks-title').getBoundingClientRect(),c=document.querySelector('.tasks-controls').getBoundingClientRect();return Math.abs(h.left)<2&&Math.abs(h.right-innerWidth)<2&&h.top===0&&Math.abs(g.left-h.left)<2&&Math.abs(g.right-h.right)<2&&Math.abs(t.top-c.top)<10})()", "the task header and compact list reach both edges, with header controls on one line")
             try await assertJS("(()=>{const rows=[...document.querySelectorAll('.task-list-row')];return rows.every(r=>r.getBoundingClientRect().height<43)&&rows.every(r=>{const t=r.querySelector('.task-row-title').getBoundingClientRect(),s=r.querySelector('.task-row-state').getBoundingClientRect();return Math.abs((t.top+t.height/2)-(s.top+s.height/2))<3})})()", "list titles and properties share a compact single-line baseline")
@@ -206,6 +207,7 @@ final class ResourceFiles: NSObject, WKURLSchemeHandler {
             try await load(text,"completion-rings")
             _=try await js("document.querySelector('[data-task=parent-a] .task-row-disclosure').click();document.querySelector('[data-task=child-a] .task-check').click();true");try await settle()
             try await assertJS("document.querySelector('[data-task=parent-a] .task-row-progress .completion-ring').dataset.progress==='0.5'", "parent ring follows subtask completion")
+            try await assertJS("document.querySelector('.tasks-page-progress').dataset.progress===String(2/6)", "the title ring updates when a subtask is completed")
             try await assertJS("[...document.querySelectorAll('.completion-ring')].every(r=>{let b=r.getBoundingClientRect();return b.width>=12&&b.width===b.height&&getComputedStyle(r).color==='rgb(199, 182, 230)'})", "rings stay circular and use the notebook accent")
             try await snapshot("-rings-list")
             _=try await js("document.querySelector('[aria-label=\"Board view\"]').click();true");try await settle()
@@ -233,6 +235,9 @@ final class ResourceFiles: NSObject, WKURLSchemeHandler {
             view.frame.size=NSSize(width:360,height:660);view.pageZoom=2.5
             _=try await js("document.querySelector('[aria-label=\"Manage goals\"]').click();document.querySelector('.goal-overview-row').click();true");try await settle()
             try await assertJS("document.documentElement.scrollWidth<=innerWidth+2", "goal details fit a narrow window at high zoom")
+            try await load(text,"project-ring-small")
+            _=try await js("document.querySelector('[aria-label=\"List view\"]').click();true");try await settle()
+            try await assertJS("(()=>{let r=document.querySelector('.tasks-page-progress').getBoundingClientRect(),t=document.querySelector('.tasks-title').getBoundingClientRect(),h=document.querySelector('.tasks-heading').getBoundingClientRect();return r.width===r.height&&r.left>=0&&r.right<t.left&&t.right<=innerWidth&&h.right<=innerWidth})()", "title and project ring fit a small window at high zoom")
             print("All task detail, composer, persistence and responsive checks passed.")
         } catch {print("FAIL",error);failed=true}
         done=true;try? FileManager.default.removeItem(at:root)

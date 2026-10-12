@@ -1,4 +1,14 @@
-import {subtaskStatus} from './task-model.js';
+import {subtaskStatus,walkTasks} from './task-model.js';
+
+// Each saved task and subtask contributes once, regardless of which groups are
+// visible. Goals summarize the same work and must not count a second time.
+export function projectCompletion(model){
+ const entries=walkTasks(model).filter(({item,ancestors})=>!item.details?.draft&&!ancestors.some(a=>a.details?.draft));
+ const total=entries.length,done=model.statuses.indexOf(model.completed);
+ const completed=entries.filter(({item,parent})=>(parent?subtaskStatus(model,item):item.status)===done).length;
+ const percent=total?Math.round(completed/total*100):0;
+ return {completed,total,label:total?`${percent}% complete · ${completed} of ${total} tasks and subtasks complete`:'No tasks yet'};
+}
 
 // Match the existing subtask counts: each immediate child is one step.
 // Leaf tasks follow their own status, never an assumed amount of work in progress.
