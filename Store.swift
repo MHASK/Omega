@@ -806,6 +806,14 @@ final class Notebook: ObservableObject {
         }
     }
 
+    func closeDeletedBySync(_ file: URL) {
+        guard selected == file, !dirty else { return }
+        LiveCollaboration.shared.stop()
+        selected = nil; text = ""; diskText = ""; revision = UUID()
+        status = "Deletion synced · original kept in Git history"
+        UserDefaults.standard.removeObject(forKey: "lastNote")
+    }
+
     func refreshFromDisk() {
         guard !checking, !dirty, !gitSyncing else { return }
         checking = true; defer { checking = false }

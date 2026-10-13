@@ -55,13 +55,15 @@ Open **Settings → Git sync**. Choose GitHub or GitLab, then **Open Git folder*
 
 Omega calls the installed `gh` or `glab` credential helper for that host. It does not create an Omega account, copy tokens into its settings, or change your global Git configuration. Sign in once with `gh auth login` or `glab auth login` if needed, and configure your usual Git commit name/email. A login supplied only through a terminal environment variable is available only to processes launched with that environment; use the CLI's persistent login for apps opened from Finder.
 
-**Sync** saves the current note, commits changed Markdown/text notes and image/PDF attachments, merges incoming changes, then pushes. Existing repository history is shared too, so use a repository intended for these notes. Hidden files and unrelated new files are not automatically committed. Preferences, archive/favorite flags, undo history, and shared label colors remain local to each Mac. Nothing is uploaded until you choose Sync; ordinary notebooks remain local.
+**Automatic sync** is on for connected Git notebooks. While Omega is open, it saves a snapshot about every 30 seconds, commits changed Markdown/text notes and image/PDF attachments, merges incoming changes, and pushes. Live editing stays connected. Turn **Sync automatically** off per notebook in Settings → Git sync, or use **Sync now** at any time. Existing repository history is shared too, so use a repository intended for these notes. Hidden files and unrelated new files are not automatically committed. Preferences, archive/favorite flags, undo history, and shared label colors remain local to each Mac. Connecting a Git notebook enables automatic publishing to its existing repository. Ordinary, unconnected notebooks remain local. Offline saves stay on your Mac and retry with a backoff when the connection returns.
 
 **Share** in a note’s header shows its repository and branch, copies a link to the last synced version, and opens sharing setup for a local-only notebook. The repository owner or organization manages access in GitHub/GitLab; copying a note link does not invite anyone or change permissions. Repository access includes its files and history, not only the linked note. New notes need a Git sync before their link is available. There is no new Omega owner: each collaborator retains their local copy.
 
 For a team: use a dedicated repository, give collaborators write access, and connect the same repository and branch on each Mac. Their existing GitHub/GitLab CLI login is used. Enable the same trusted relay in **Settings → Git sync → Live editing** to edit together. Share does not automatically publish local notes or change repository visibility.
 
-Incoming merges are tested in a temporary worktree. Overlapping edits stop with your live files intact and local edits committed. Resolve that conflict with Git, then sync again. There are no force pushes or resets of working files. Staged changes or an unfinished merge/rebase block sync. File changes arriving during synchronization are preserved and may require another sync. A local Git backup reference is kept before accepting incoming changes.
+Incoming changes are merged in a private worktree, away from open files. Compatible shared checkpoints merge through Yjs, preserving edits made during the fetch, cursors and author-local undo. Ordinary text conflicts, different shared baselines, attachment conflicts and deletion conflicts appear as **Review changes** in Git settings and **Review** in the notebook footer. Review opens a full workspace with a file sidebar, split or unified Git diffs, and an editable result. Move between conflicting sections, compare with the original, and use the current change, incoming change, or both. Non-conflicting edits are combined by Git. Mark the file resolved when the result is ready. The File actions menu can keep a complete version or keep two files, creating a uniquely named incoming sibling. Review drafts and per-conflict choices are saved locally as you work. Both original commits remain protected by local Git backup references. Unfinished reviews survive an app restart and can be resolved offline; the result pushes when the connection returns.
+
+A resolution is checked against the copies you reviewed. If another app or collaborator changes the notebook during review, Omega prepares the latest copies instead of overwriting that work. There are no force pushes or resets of working files. Pre-existing staged changes, an unfinished merge/rebase, or incoming changes outside the supported note/attachment scope still need attention in Git. Automatic retries never discard those changes.
 
 Git sync saves files and their history. Optional live editing shares concurrent changes through a memory-only relay; it requires a connected Git notebook and repository write access. The local assistant integration continues to use revision checks to protect concurrent writes.
 
@@ -86,11 +88,14 @@ Run native checks on an Apple silicon Mac:
 /path/Omega.app/Contents/MacOS/Folio --undo-test
 ```
 
-Run Git synchronization checks with two temporary repositories:
+Run Git synchronization checks with isolated temporary repositories (including live editing and the in-app review):
 
 ```sh
 xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o /tmp/Omega-Git-Check
 /tmp/Omega-Git-Check
+xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitAutoSyncCheck.swift -o /tmp/Omega-Auto-Git-Check
+/tmp/Omega-Auto-Git-Check
+./Tests/check-git-app.sh
 ```
 
 Tests use temporary notes and isolated preferences. GitHub Actions runs editor and native checks on pushes and pull requests.
@@ -124,6 +129,6 @@ Settings → Git sync now includes **Live editing**. Connect the same Git reposi
 
 The hosted relay for this installation is `https://omega.naridon.com`. It permits repositories under `MHASK` on GitHub and `ashiqwayanad007` on GitLab, with each participant's write permission checked separately. Other deployments can choose their own allowlist. No note is uploaded simply by installing the app.
 
-[Relay setup and trust model](Relay/README.md) includes Docker Compose, HTTPS, access checks, and the zero-persistence model. Git carries notes, attachments, and the shared editing checkpoints under `.omega/live/`. Live editing shares open document contents; the relay never writes them to disk and forgets a room when its last participant leaves. Pause live editing before a Git sync. Live undo is author-local within the session; durable Markdown history stays local.
+[Relay setup and trust model](Relay/README.md) includes Docker Compose, HTTPS, access checks, and the zero-persistence model. Git carries notes, attachments, and the shared editing checkpoints under `.omega/live/`. Live editing shares open document contents; the relay never writes them to disk and forgets a room when its last participant leaves. Git sync runs alongside live editing; no pause or reconnect is needed. Live undo is author-local within the session; durable Markdown history stays local.
 
 Cursor and selection updates are ephemeral: they never enter Markdown, Git checkpoints, or undo history. Visual and source notes show precise carets and selections; task titles do too. Task descriptions show a small named editing indicator. Cursors disappear on disconnect and return after reconnecting.

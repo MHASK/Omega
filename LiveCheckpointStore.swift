@@ -8,8 +8,12 @@ struct LiveCheckpoint: Codable {
 }
 
 // Shared history travels in the same Git commit as the Markdown it projects.
-// Git conflicts stop before touching live files; they are never auto-resolved.
+// Compatible shared histories merge as CRDT updates; other conflicts are reviewed
+// before the live files change.
 enum LiveCheckpointStore {
+    static func encode(_ value: LiveCheckpoint) throws -> Data {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(value)
+    }
     static let limit = 12 * 1024 * 1024
     static func file(root: URL, note: String) throws -> URL {
         guard !note.isEmpty, !note.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0.hasPrefix(".") || $0.contains("\\") }) else { throw GitFailure("Invalid shared note path.") }
@@ -33,8 +37,7 @@ enum LiveCheckpointStore {
     }
     static func write(_ value: LiveCheckpoint, to file: URL, root: URL) throws {
         try validate(file, root: root)
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
+        let data = try encode(value)
         guard data.count <= limit else { throw GitFailure("The shared checkpoint is too large. Your Markdown is safe on this Mac.") }
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: file, options: .atomic)

@@ -1,3 +1,4 @@
+import {checkpointDoc} from './git-checkpoints.js';
 import {LivePresence} from './live-presence.js';
 import Collaboration from '@tiptap/extension-collaboration';
 import {Editor} from '@tiptap/core';
@@ -78,6 +79,19 @@ export class LiveEditor {
   finally{this.remote=false;}
   this.checkpoint({push:message.type==='state'});
   if(message.type==='state')this.presence.activate(this.supportsPresence);
+ }
+ importGit(checkpoint){
+  if(this.stopped||this.conflict||this.host.composing())return false;
+  let incoming;
+  try{
+   incoming=checkpointDoc(checkpoint);
+   if(incoming.getMap('meta').get('lineage')!==this.doc.getMap('meta').get('lineage')||incoming.getMap('meta').get('kind')!==this.kind)return false;
+   // Merge into this document; never remount it or reset awareness/undo/cursors.
+   this.remote=true;
+   try{Y.applyUpdate(this.doc,Y.encodeStateAsUpdate(incoming),remoteOrigin);if(this.kind!=='rich'){this.host.refresh(this);this.presence.restoreSelection();}this.previous=this.kind==='tasks'?readTasks(this.doc):null;}
+   finally{this.remote=false;}
+   this.checkpoint({push:this.joined});return true;
+  }catch{return false;}finally{incoming?.destroy();}
  }
  flush(){const pending=this.pending;this.pending=[];for(const message of pending)this.receive(message);}
  adopt(incoming){

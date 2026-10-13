@@ -27,6 +27,13 @@ jobs:
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'
       - run: xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"
       - run: '"$RUNNER_TEMP/GitSyncCheck"'
+      - run: ./Tests/check-git-app.sh
+      - run: xcrun swiftc GitSync.swift GitMerge.swift LiveCheckpointStore.swift Tests/GitMergeCheck.swift -o "$RUNNER_TEMP/GitMergeCheck"
+      - run: '"$RUNNER_TEMP/GitMergeCheck" "$RUNNER_TEMP/merge-fixture.json"'
+      - run: xcrun swiftc -parse-as-library Tests/WebMergeCheck.swift -o "$RUNNER_TEMP/WebMergeCheck" -framework AppKit -framework WebKit
+      - run: '"$RUNNER_TEMP/WebMergeCheck" "$PWD/Resources" "$RUNNER_TEMP/merge-fixture.json" "$RUNNER_TEMP"'
+      - run: xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitAutoSyncCheck.swift -o "$RUNNER_TEMP/GitAutoSyncCheck"
+      - run: '"$RUNNER_TEMP/GitAutoSyncCheck"'
       - run: xcrun swiftc -parse-as-library Tests/WebLiveCheck.swift -o "$RUNNER_TEMP/WebLiveCheck" -framework AppKit -framework WebKit
       - run: '"$RUNNER_TEMP/WebLiveCheck" "$PWD/Resources"'
       - run: xcrun swiftc -parse-as-library Tests/WebPresenceCheck.swift -o "$RUNNER_TEMP/WebPresenceCheck" -framework AppKit -framework WebKit

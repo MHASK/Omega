@@ -116,6 +116,7 @@ struct ScrollEdgeFade: View {
 struct FolioView: View {
     @ObservedObject var notebook: Notebook
     @ObservedObject private var updater = GitHubUpdater.shared
+    @ObservedObject private var gitSync = GitNotebooks.shared
     @StateObject private var noteSearch = NoteSearchModel()
     @State private var sidebarToggleHovered = false
     @State private var showingArchive = false
@@ -126,11 +127,14 @@ struct FolioView: View {
 
     var body: some View {
         ZStack {
-            workspace.opacity(notebook.showingSettings ? 0 : 1)
-                .allowsHitTesting(!notebook.showingSettings).accessibilityHidden(notebook.showingSettings)
+            workspace.opacity(notebook.showingSettings || gitSync.reviewing != nil ? 0 : 1)
+                .allowsHitTesting(!notebook.showingSettings && gitSync.reviewing == nil).accessibilityHidden(notebook.showingSettings || gitSync.reviewing != nil)
             if notebook.showingSettings {
                 FolioSettingsView(notebook: notebook)
+                    .opacity(gitSync.reviewing == nil ? 1 : 0)
+                    .allowsHitTesting(gitSync.reviewing == nil).accessibilityHidden(gitSync.reviewing != nil)
             }
+            if let path = gitSync.reviewing, let entry = gitSync.notebooks.first(where: { $0.path == path }) { GitConflictView(notebook: notebook, entry: entry) }
         }
         .preferredColorScheme(notebook.appearance == "system" ? nil : notebook.appearance == "dark" ? .dark : .light)
     }
@@ -383,6 +387,7 @@ struct FolioView: View {
         let narrow = width / scale < 300
         return Group {
                 HStack(spacing: 10 * scale) {
+                    GitSyncIndicator(notebook: notebook)
                     LiveStatusView(notebook: notebook)
                     if !compact { Text("\(notebook.cursorLine):\(notebook.cursorColumn)").frame(maxWidth: .infinity, alignment: .leading) }
                     Text(narrow ? "\(NoteFiles.wordCount(notebook.text))W" : "\(notebook.lineCount)L \(NoteFiles.wordCount(notebook.text))W")

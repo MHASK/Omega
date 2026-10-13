@@ -383,3 +383,31 @@ import {runWritingTests} from './writing-test.mjs';
 runWritingTests();
 import {runWritingCollaborationTests} from './writing-test.mjs';
 runWritingCollaborationTests();
+
+// Git merges the same durable CRDT states used by the live editor. Offline edits
+// and assistant changes in Markdown must survive without duplicate baselines.
+import {mergeGitCheckpoints,sharedText,patchShared} from './git-checkpoints.js';
+import {Y,seedModel,encode,decode} from './live-model.js';
+const cp=doc=>({state:encode(Y.encodeStateAsUpdate(doc)),text:sharedText(doc),accepted:true});
+const fork=doc=>{const next=new Y.Doc({gc:false});Y.applyUpdate(next,Y.encodeStateAsUpdate(doc));return next;};
+const common=seedModel('Shared words.\n','source'),left=fork(common),right=fork(common);
+left.getText('source').insert(0,'Left ');right.getText('source').insert(right.getText('source').length,'Right\n');
+let joined=mergeGitCheckpoints({mine:cp(left),incoming:cp(right)});
+assert(joined.text.includes('Left Shared words.')&&joined.text.includes('Right'));
+assert.equal(mergeGitCheckpoints({mine:joined,incoming:cp(right)}).text,joined.text,'Repeated Git imports are idempotent');
+const external=mergeGitCheckpoints({mine:cp(left),mineText:'Left Shared words.\nAssistant\n',incoming:cp(right)});
+assert(external.text.includes('Assistant')&&external.text.includes('Right'),'Outside Markdown edits enter the shared history before merging');
+const decided=mergeGitCheckpoints({mine:cp(left),incoming:cp(right),resolvedText:'A reviewed result.\n'});
+assert.equal(decided.text,'A reviewed result.\n');
+const final=new Y.Doc();Y.applyUpdate(final,decode(decided.state));Y.applyUpdate(final,Y.encodeStateAsUpdate(right));
+assert.equal(sharedText(final),decided.text,'A resolved choice has seen and superseded both states');
+const unrelated=seedModel('Another baseline','source');assert.equal(mergeGitCheckpoints({mine:cp(left),incoming:cp(unrelated)}),null);
+assert.equal(mergeGitCheckpoints({mine:{state:'invalid',text:'Keep me'}}),null);
+const richEditor=new Editor({element:document.createElement('div'),extensions:extensions({nativeHistory:true}),content:'# Title\n\nWords here.\n',contentType:'markdown'});
+import {prosemirrorToYDoc} from '@tiptap/y-tiptap';
+const rich=prosemirrorToYDoc(richEditor.state.doc,'body');rich.gc=false;rich.getMap('meta').set('version',1);rich.getMap('meta').set('kind','rich');rich.getMap('meta').set('lineage','git-rich-fixture');richEditor.destroy();
+const ra=fork(rich),rb=fork(rich);patchShared(ra,'# Title changed\n\nWords here.\n');patchShared(rb,'# Title\n\nWords here and there.\n');
+const rj=mergeGitCheckpoints({mine:cp(ra),incoming:cp(rb)});
+assert(rj.text.includes('Title changed')&&rj.text.includes('Words here and there.'),'Rich shared state preserves independent offline edits');
+for(const doc of [common,left,right,final,unrelated,rich,ra,rb])doc.destroy();
+console.log('PASS: Git CRDT merge, idempotence, outside edits, reviewed resolution, lineage rejection, and rich text projection.');

@@ -86,6 +86,12 @@ final class PresenceTestFiles: NSObject, WKURLSchemeHandler {
             try check(try await count(2,".live-caret")==2,"both cursors remain visible after a concurrent text insertion")
             let caretOffset=try await js(2,"(()=>{const p=document.querySelector('#editor .tiptap p'),c=[...p.querySelectorAll('.live-caret')].at(-1),r=document.createRange();r.setStart(p,0);r.setEndBefore(c);const x=document.createElement('div');x.append(r.cloneContents());x.querySelectorAll('.live-caret').forEach(n=>n.remove());return x.textContent.length})()") as! Int
             try check(caretOffset==23,"a collaborator’s cursor follows its original text when another person inserts before it")
+            let checkpoint=checkpoints[2]!,current=try await text(2)
+            let fromGit=try await js(2,"window.folio.mergeGitCheckpoints(\(json(["mine":checkpoint,"resolvedText":current+"\nFrom the Git notebook.\n"])))") as! [String:Any]
+            let imported=try await js(2,"window.folio.gitApply(\(json(["id":"presence","checkpoint":fromGit,"expected":current,"text":fromGit["text"]!])))") as? [String:Any]
+            try check(imported != nil,"Git imports into an already-connected document")
+            try await waitFor("Git update reaches live peer"){try await self.text(0).contains("From the Git notebook.")}
+            try check(try await count(2,".live-caret")==2,"both remote cursors survive Git synchronization without a reconnect")
             _ = try await js(2,"window.folio.configure({theme:'light',zoom:1});true");try await screenshot(2,"live-cursors-light")
             close(1);try await waitFor("departed cursor removed"){try await self.count(2,".live-caret")==1}
             try check(true,"leaving removes only that participant’s cursor")

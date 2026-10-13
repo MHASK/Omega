@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         positionWindowButtons()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        DispatchQueue.main.async { self.notebook.start(); self.startAssistantServer(); GitHubUpdater.shared.start(notebook: self.notebook) { self.updating = true } }
+        DispatchQueue.main.async { self.notebook.start(); GitNotebooks.shared.start(notebook: self.notebook); self.startAssistantServer(); GitHubUpdater.shared.start(notebook: self.notebook) { self.updating = true } }
     }
     func positionWindowButtons() {
         guard let window else { return }

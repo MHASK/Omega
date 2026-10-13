@@ -1,3 +1,4 @@
+import {mergeGitCheckpoints} from './git-checkpoints.js';
 import {LiveEditor} from './live-editor.js';
 import {configureLabelColors} from './task-labels.js';
 import { Editor } from '@tiptap/core';
@@ -370,7 +371,7 @@ window.folio={
   if(lastScale!==(config.zoom||1)){$('toast').textContent=Math.round((config.zoom||1)*100)+'%';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,1100);lastScale=config.zoom||1;}
   readOnly=!!config.reading;taskPage.setReadOnly(readOnly||undoHistory.busy);source.readOnly=readOnly||undoHistory.busy;editor?.setEditable(!readOnly&&!undoHistory.busy,false);
  },
- snapshot(){return {id:identity,text:value()};},
+ snapshot(){if(live)live.checkpoint();return {id:identity,text:value()};},
  liveStart(config){
   if(config.id!==identity||live)return false;
   const host={editor:()=>editor,value,send:(type,data)=>send(type,{id:identity,...data}),composing:()=>editor?.view.composing||taskPage.descriptions.some(e=>e.view?.composing),
@@ -386,6 +387,18 @@ window.folio={
   live=new LiveEditor(host,{...config,kind:taskMode?'tasks':sourceMode?'source':'rich'});
   if(config.externalText!==undefined){const applied=this.replaceForAssistant({id:identity,expected:value(),text:config.externalText});if(!applied){this.liveStop();send('liveNotice',{message:'This file changed its document format. Live editing is paused; both its local file and shared history are preserved.'});return false;}}return true;
  },
+ mergeGitCheckpoints,
+ gitApply(config){
+  if(config.id!==identity||taskPage.busy||undoHistory.busy||writing.busy||editor?.view.composing||!$('entry').hidden)return null;
+  if(live&&config.checkpoint&&!config.resolved){if(!live.importGit(config.checkpoint))return null;}
+  else {
+   if(config.expected!==value())return null;
+   if(config.text!==value()&&!this.replaceForAssistant({id:identity,expected:config.expected,text:config.text}))return null;
+   if(live)live.checkpoint({push:live.joined});
+  }
+  emitChange();
+  return {id:identity,text:value(),...(live?{checkpoint:{state:live.state(),text:value(),accepted:live.accepted}}:{})};
+ },
  liveMessage(message){live?.receive(message);},
  liveAccept(){live?.accept();},
  liveStop(){if(!live)return;const text=value();live.destroy();live=null;this.load({id:identity,text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});},
@@ -396,7 +409,7 @@ window.folio={
  replaceForAssistant(config){
   if(config.id!==identity || config.expected!==value() || taskPage.busy || undoHistory.busy || writing.busy || !blocks.menu.hidden || editor?.view.composing || !$('entry').hidden || !pagePicker.element.hidden)return false;
   // Compare and replace in one JavaScript turn. A keystroke cannot land between them.
-  if(live?.kind==='rich'){try{const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),current=editor.state.doc,start=current.content.findDiffStart(next.content);if(start!==null){const end=current.content.findDiffEnd(next.content);let a=end.a,b=end.b;if(a<start){b+=start-a;a=start;}if(b<start){a+=start-b;b=start;}editor.view.dispatch(editor.state.tr.replace(start,a,next.slice(start,b)));}return true;}catch{return false;}}
+  if(live?.kind==='rich'){if(parseTasks(config.text)||needsSource(config.text))return false;try{const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),current=editor.state.doc,start=current.content.findDiffStart(next.content);if(start!==null){const end=current.content.findDiffEnd(next.content);let a=end.a,b=end.b;if(a<start){b+=start-a;a=start;}if(b<start){a+=start-b;b=start;}editor.view.dispatch(editor.state.tr.replace(start,a,next.slice(start,b)));}return true;}catch{return false;}}
   if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
   const scroll=scroller.scrollTop, sourceScroll=source.scrollTop;
   const selection=editor?.state.selection.from || 1;

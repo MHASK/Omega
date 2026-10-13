@@ -84,14 +84,31 @@ final class LiveTestFiles: NSObject, WKURLSchemeHandler {
             try await load(0,textA);try await load(1,textB);try await join(0,offlineA);try await join(1,offlineB)
             let recovered=try await text(0),recoveredPeer=try await text(1)
             try check(recovered == recoveredPeer && recovered.contains("Offline A") && recovered.contains("Offline B"),"empty relay recovers concurrent offline edits entirely from client checkpoints")
+            // A Git fetch returns a snapshot while both live editors keep typing.
+            sharing=false
+            try await append(0," Git local");try await append(1," Git incoming")
+            let gitLocal=checkpoints[0]!,gitRemote=checkpoints[1]!
+            let gitMerged=try await js(0,"window.folio.mergeGitCheckpoints(\(json(["mine":gitLocal,"incoming":gitRemote])))") as! [String:Any]
+            try await append(0," Still typing")
+            let applied=try await js(0,"window.folio.gitApply(\(json(["id":"live","checkpoint":gitMerged,"expected":"outdated snapshot","text":gitMerged["text"]!])))") as? [String:Any]
+            try check(applied != nil,"Git checkpoint imports without stopping the live session")
+            let gitText=try await text(0)
+            try check(gitText.contains("Git local") && gitText.contains("Git incoming") && gitText.contains("Still typing"),"typing after the Git snapshot survives the incoming merge")
+            let stable=try await js(0,"window.folio.gitApply(\(json(["id":"live","checkpoint":gitMerged,"expected":"old","text":gitMerged["text"]!])))") as? [String:Any]
+            try check(stable?["text"] as? String == gitText,"repeated Git checkpoint import is idempotent in WebKit")
+            sharing=true;deliver(1,["type":"update","update":checkpoints[0]!["state"]!]);try await settle()
+            try check(try await text(0)==text(1),"Git changes propagate to the other editor without leaving live editing")
+            _ = try await js(0,"window.folio.command('undo');true");try await settle()
+            try check(try await text(0).contains("Git incoming"),"local undo after Git sync retains the remote edit")
             let oldBaseline=checkpoints[1]!
             // A fresh independently seeded client arrives first after the relay empties.
             _ = try await js(0,"window.folio.liveStop();true");_ = try await js(1,"window.folio.liveStop();true")
             state=""
             try await load(0,"# Independently changed\n\nA different Git baseline.\n");try await join(0)
-            try await load(1,recovered);try await join(1,oldBaseline)
+            let latestRecovered=try await text(1)
+            try await load(1,latestRecovered);try await join(1,oldBaseline)
             let preserved=try await text(1)
-            try check(conflicts==1 && preserved==recovered,"a returning client never merges an unrelated seed after relay restart")
+            try check(conflicts==1 && preserved==latestRecovered,"a returning client never merges an unrelated seed after relay restart")
             _ = try await js(1,"window.folio.liveAccept();true");try await settle()
             try check(try await text(0)==text(1),"explicit adoption remains safe across different stored baselines")
             conflicts=0
@@ -123,5 +140,5 @@ final class LiveTestFiles: NSObject, WKURLSchemeHandler {
     }
 }
 @main struct Main {
-    @MainActor static func main(){let test=LiveWebCheck();test.start(URL(fileURLWithPath:CommandLine.arguments[1]));let deadline=Date().addingTimeInterval(45);while !test.done && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.03))};exit(test.done && !test.failed ? 0 : 1)}
+    @MainActor static func main(){let test=LiveWebCheck();test.start(URL(fileURLWithPath:CommandLine.arguments[1]));let deadline=Date().addingTimeInterval(75);while !test.done && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.03))};exit(test.done && !test.failed ? 0 : 1)}
 }

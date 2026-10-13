@@ -1,5 +1,8 @@
 import Foundation
 import Darwin
+import CryptoKit
+
+enum GitDigest { static func of(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() } }
 
 struct GitFailure: LocalizedError {
     let message: String
@@ -16,6 +19,8 @@ enum GitProvider: String, Codable, CaseIterable, Identifiable {
 struct GitNotebook: Codable, Identifiable, Equatable {
     let path: String
     let provider: GitProvider
+    var automatic: Bool? = nil
+    var autoSync: Bool { automatic ?? true }
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }
 }
@@ -48,7 +53,7 @@ struct GitSnapshot {
 // Git works on the same local Markdown files as the editor. Tokens are supplied
 // directly by the installed CLI's credential helper, never read or saved here.
 struct GitRunner {
-    struct Output { let status: Int32; let text: String }
+    struct Output { let status: Int32; let data: Data; var text: String { String(decoding: data, as: UTF8.self) } }
     var executable = URL(fileURLWithPath: "/usr/bin/git")
     var timeout: TimeInterval = 90
     static func cli(_ name: String) -> URL? {
@@ -74,7 +79,7 @@ struct GitRunner {
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit(); timeoutWork.cancel()
-        let result = Output(status: process.terminationStatus, text: String(decoding: data, as: UTF8.self))
+        let result = Output(status: process.terminationStatus, data: data)
         // Never surface raw CLI output: it can include credentials from a user's remote/config.
         if result.status != 0 && !allowFailure { throw GitFailure("Git couldn’t finish this step. Your local files are safe. Check the repository and your CLI connection, then try again.") }
         return result
@@ -97,7 +102,7 @@ struct GitRunner {
     }
     func inspect(_ root: URL) throws -> GitSnapshot {
         let top = try git(["rev-parse", "--show-toplevel"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard URL(fileURLWithPath: top).resolvingSymlinksInPath() == root.resolvingSymlinksInPath() else { throw GitFailure("Choose the repository’s top folder so its scope is clear.") }
+        guard URL(fileURLWithPath: top).resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path else { throw GitFailure("Choose the repository’s top folder so its scope is clear.") }
         let branch = try git(["symbolic-ref", "--quiet", "--short", "HEAD"], at: root, allowFailure: true)
         guard branch.status == 0 else { throw GitFailure("Switch this repository to a branch before syncing.") }
         let remote = try GitRemote(git(["config", "--get", "remote.origin.url"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -118,14 +123,9 @@ struct GitRunner {
         return !parts.isEmpty && parts.allSatisfy { !$0.isEmpty && !$0.hasPrefix(".") } &&
             ["md", "markdown", "txt", "png", "jpg", "jpeg", "gif", "webp", "svg", "heic", "pdf"].contains(URL(fileURLWithPath: path).pathExtension.lowercased())
     }
-    func sync(_ root: URL, credentials: [String]) throws -> String {
-        let info = try inspect(root)
+    func commitNotes(_ root: URL) throws {
+        _ = try inspect(root)
         let gitPath = try git(["rev-parse", "--absolute-git-dir"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lock = open(gitPath + "/omega-sync.lock", O_CREAT | O_RDWR, 0o600)
-        guard lock >= 0 else { throw GitFailure("Couldn’t lock this repository for sync.") }
-        defer { close(lock) }
-        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw GitFailure("This notebook is already syncing.") }
-        defer { flock(lock, LOCK_UN) }
         for name in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"] {
             if FileManager.default.fileExists(atPath: gitPath + "/" + name) { throw GitFailure("Finish the current merge or rebase in Git before syncing. Omega hasn’t changed your files.") }
         }
@@ -167,42 +167,245 @@ struct GitRunner {
                 guard rename(indexLockURL.path, ordinaryIndex.path) == 0 else { throw GitFailure("The notes were committed, but Git’s index couldn’t be updated. Your files and commit are safe.") }
             }
         }
-        let head = try git(["rev-parse", "HEAD"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mergeRef = try git(["config", "--get", "branch.\(info.branch).merge"], at: root, allowFailure: true).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let remoteBranch = mergeRef.isEmpty ? "refs/heads/" + info.branch : mergeRef
-        guard remoteBranch.hasPrefix("refs/heads/"), try git(["check-ref-format", remoteBranch], at: root, allowFailure: true).status == 0 else { throw GitFailure("Choose a regular remote branch before syncing.") }
-        let upstreamRemote = try git(["config", "--get", "branch.\(info.branch).remote"], at: root, allowFailure: true).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard upstreamRemote.isEmpty || upstreamRemote == "origin" else { throw GitFailure("This branch tracks a different remote. Set its upstream to origin before syncing.") }
-        let remoteHeads = try git(["ls-remote", "--heads", "origin", remoteBranch], at: root, credentials: credentials).text
-        var target = head
-        if !remoteHeads.isEmpty {
-            _ = try git(["fetch", "--no-tags", "origin", remoteBranch], at: root, credentials: credentials)
-            let fetched = try git(["rev-parse", "FETCH_HEAD"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if try git(["merge-base", "--is-ancestor", fetched, head], at: root, allowFailure: true).status != 0 {
-                if try git(["merge-base", "--is-ancestor", head, fetched], at: root, allowFailure: true).status == 0 { target = fetched }
-                else {
-                    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("Omega-Merge-" + UUID().uuidString)
-                    _ = try git(["worktree", "add", "--detach", scratch.path, head], at: root)
-                    defer { _ = try? git(["worktree", "remove", "--force", scratch.path], at: root) }
-                    try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scratch.path)
-                    let merge = try git(["merge", "--no-edit", fetched], at: scratch, allowFailure: true)
-                    guard merge.status == 0 else { throw GitFailure("Both copies changed the same content. Your local notes are untouched and saved in Git. Resolve the branch conflict in Git, then sync again.") }
-                    target = try git(["rev-parse", "HEAD"], at: scratch).text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    func sync(_ root: URL, credentials: [String]) throws -> String {
+        let session = try GitSyncSession(root: root, runner: self)
+        defer { session.discard() }
+        try session.fetch(credentials: credentials)
+        guard try session.conflicts().isEmpty else { throw GitFailure("Both copies changed the same content. Review the copies in Omega.") }
+        _ = try session.apply()
+        return try session.push(credentials: credentials)
+    }
+}
+
+// A sync owns a private merge worktree. Network requests never touch an open
+// document. Only apply() touches the checkout, under the app's short main-actor
+// save transaction; all slower work runs in the background.
+struct GitReview: Identifiable {
+    let path: String
+    let mine: Data?
+    let incoming: Data?
+    let base: Data?
+    let checkpointPath: String?
+    var id: String { path }
+    var editable: Bool { ["md", "markdown", "txt"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) && [mine, incoming].compactMap { $0 }.allSatisfy { $0.count < 2_000_000 && String(data: $0, encoding: .utf8) != nil } }
+}
+struct GitSharedPair {
+    let path: String
+    let checkpointPath: String
+    let mine: LiveCheckpoint
+    let incoming: LiveCheckpoint
+    let mineText: String
+    let incomingText: String
+}
+struct GitChangedDuringSync: LocalizedError {
+    var errorDescription: String? { "New edits are safe. Omega will include them in the next sync." }
+}
+
+final class GitSyncSession: @unchecked Sendable {
+    struct Record: Codable {
+        let branch: String
+        let remoteURL: String
+        let remoteBranch: String
+        var head: String
+        var fetched: String?
+        var workspace: String?
+        var resolved: [String] = []
+        var manual: [String] = []
+        var reviewDrafts: [String: String]?
+        let baseline: [String: String]
+    }
+    let root: URL
+    let runner: GitRunner
+    let directory: URL
+    var record: Record
+    private var lock: Int32 = -1
+    private let fm = FileManager.default
+    private(set) var applied = false
+    var workspace: URL? { record.workspace.map { URL(fileURLWithPath: $0) } }
+    var reviewFile: URL { directory.appendingPathComponent("omega-review.json") }
+    var branch: String { record.branch }
+    var hasIncoming: Bool { workspace != nil }
+
+    init(root input: URL, runner: GitRunner = GitRunner(), restoring: Bool = false) throws {
+        let root = input.resolvingSymlinksInPath()
+        self.root = root; self.runner = runner
+        let info = try runner.inspect(root)
+        directory = URL(fileURLWithPath: try runner.git(["rev-parse", "--absolute-git-dir"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let upstream = try runner.git(["config", "--get", "branch.\(info.branch).merge"], at: root, allowFailure: true).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remoteBranch = upstream.isEmpty ? "refs/heads/" + info.branch : upstream
+        let remote = try runner.git(["config", "--get", "branch.\(info.branch).remote"], at: root, allowFailure: true).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard remote.isEmpty || remote == "origin", remoteBranch.hasPrefix("refs/heads/"), try runner.git(["check-ref-format", remoteBranch], at: root, allowFailure: true).status == 0 else { throw GitFailure("Set this branch’s upstream to a regular origin branch before syncing.") }
+        record = Record(branch: info.branch, remoteURL: info.remote.url, remoteBranch: remoteBranch, head: "", baseline: [:])
+        lock = open(directory.appendingPathComponent("omega-sync.lock").path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else { if lock >= 0 { close(lock); lock = -1 }; throw GitFailure("This notebook is already syncing.") }
+        do {
+            var restored = false
+            if restoring, let data = try? Data(contentsOf: reviewFile), let saved = try? JSONDecoder().decode(Record.self, from: data) {
+                let safePath = saved.workspace.map { $0.hasPrefix(directory.appendingPathComponent("omega-merge").path + "/") } == true
+                if safePath, saved.branch == info.branch, saved.remoteURL == info.remote.url,
+                   saved.head == (try? command(["rev-parse", "HEAD"])), let path = saved.workspace, fm.fileExists(atPath: path) {
+                    record = saved; restored = true
+                } else {
+                    if safePath, let path = saved.workspace { _ = try? runner.git(["worktree", "remove", "--force", path], at: root) }
+                    try? fm.removeItem(at: reviewFile)
                 }
-                // Editors or other tools may have changed files during the fetch/merge.
-                guard try git(["rev-parse", "HEAD"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines) == head,
-                      try git(["status", "--porcelain=v1"], at: root).text.isEmpty else { throw GitFailure("Files changed while syncing. They are safe locally; sync again when other edits finish.") }
-                _ = try git(["update-ref", "refs/omega/backups/" + UUID().uuidString, head], at: root)
-                _ = try git(["merge", "--ff-only", target], at: root)
             }
+            if !restored {
+                try runner.commitNotes(root)
+                let head = try command(["rev-parse", "HEAD"])
+                record = Record(branch: info.branch, remoteURL: info.remote.url, remoteBranch: remoteBranch, head: head, baseline: try workingSnapshot())
+                guard try runner.git(["diff", "--quiet"], at: root, allowFailure: true).status == 0 else { throw GitChangedDuringSync() }
+            }
+        } catch { releaseLock(); throw error }
+    }
+    deinit { releaseLock() }
+    private func releaseLock() { if lock >= 0 { flock(lock, LOCK_UN); close(lock); lock = -1 } }
+    func command(_ args: [String], at folder: URL? = nil) throws -> String { try runner.git(args, at: folder ?? root).text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    func paths(_ ref: String) throws -> [String] { try runner.git(["ls-tree", "-r", "--name-only", "-z", ref], at: root).text.split(separator: "\0").map(String.init) }
+    func blob(_ ref: String, _ path: String) throws -> Data? {
+        let result = try runner.git(["cat-file", "blob", ref + ":" + path], at: root, allowFailure: true)
+        return result.status == 0 ? result.data : nil
+    }
+    private func workingSnapshot() throws -> [String: String] {
+        let tracked = try runner.git(["ls-files", "-z"], at: root).text.split(separator: "\0").map(String.init)
+        let extra = try runner.git(["ls-files", "--others", "--exclude-standard", "-z"], at: root).text.split(separator: "\0").map(String.init)
+        var result: [String: String] = [:]
+        for path in Set(tracked + extra).filter(GitRunner.isNotePath) {
+            let url = root.appendingPathComponent(path)
+            guard url.resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().appendingPathComponent(path).standardizedFileURL.path else { throw GitFailure("Symbolic links cannot be synced as notes.") }
+            if fm.fileExists(atPath: url.path) { result[path] = GitDigest.of(try Data(contentsOf: url)) }
         }
-        // No force pushes. If someone pushed meanwhile, Git rejects this and a retry merges safely.
-        guard try git(["rev-parse", "HEAD"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines) == target,
-              try git(["symbolic-ref", "--short", "HEAD"], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines) == info.branch else {
-            throw GitFailure("The active branch changed during sync. Your notes are safe; try again after other Git operations finish.")
+        return result
+    }
+    func validate(except paths: Set<String> = []) throws {
+        guard try command(["rev-parse", "HEAD"]) == record.head,
+              try command(["symbolic-ref", "--short", "HEAD"]) == record.branch,
+              try GitRemote(command(["config", "--get", "remote.origin.url"])).url == record.remoteURL,
+              try runner.git(["diff", "--cached", "--quiet"], at: root, allowFailure: true).status == 0 else { throw GitChangedDuringSync() }
+        let now = try workingSnapshot()
+        guard now.filter({ !paths.contains($0.key) }) == record.baseline.filter({ !paths.contains($0.key) }) else { throw GitChangedDuringSync() }
+    }
+    func fetch(credentials: [String]) throws {
+        let found = try runner.git(["ls-remote", "--heads", "origin", record.remoteBranch], at: root, credentials: credentials).text
+        guard !found.isEmpty else { return }
+        _ = try runner.git(["fetch", "--no-tags", "origin", record.remoteBranch], at: root, credentials: credentials)
+        let fetched = try command(["rev-parse", "FETCH_HEAD"])
+        guard try runner.git(["merge-base", "--is-ancestor", fetched, record.head], at: root, allowFailure: true).status != 0 else { return }
+        record.fetched = fetched
+        let base = try command(["merge-base", record.head, fetched])
+        let changed = try runner.git(["diff", "--name-only", "--no-renames", "-z", base, fetched], at: root).text.split(separator: "\0").map(String.init)
+        guard changed.allSatisfy(GitRunner.isNotePath) else { throw GitFailure("Incoming changes include files outside notes and attachments. Update this repository in Git first.") }
+        // Never check out a remote symbolic link or submodule into the notebook.
+        let entries = try runner.git(["ls-tree", "-r", "-z", fetched], at: root).text.split(separator: "\0")
+        guard !entries.contains(where: { $0.hasPrefix("120000 ") || $0.hasPrefix("160000 ") }) else { throw GitFailure("Incoming symbolic links or submodules need to be handled in Git.") }
+        let parent = directory.appendingPathComponent("omega-merge")
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let folder = parent.appendingPathComponent(UUID().uuidString)
+        _ = try command(["worktree", "add", "--detach", folder.path, record.head])
+        record.workspace = folder.path
+        _ = try command(["update-ref", "refs/omega/backups/" + folder.lastPathComponent + "-local", record.head])
+        _ = try command(["update-ref", "refs/omega/backups/" + folder.lastPathComponent + "-incoming", fetched])
+        _ = try runner.git(["merge", "--no-commit", "--no-ff", fetched], at: folder, allowFailure: true)
+        // A failed merge must either leave actual conflicts or a valid merge index.
+        guard fm.fileExists(atPath: (try command(["rev-parse", "--absolute-git-dir"], at: folder)) + "/MERGE_HEAD") else { throw GitFailure("Git could not prepare the incoming changes. Your notebook is unchanged.") }
+    }
+    func unresolved() throws -> [String] {
+        guard let workspace else { return [] }
+        return try runner.git(["diff", "--name-only", "--diff-filter=U", "-z"], at: workspace).text.split(separator: "\0").map(String.init)
+    }
+    func notePaths() throws -> [String] {
+        var all = try Set(paths(record.head) + (record.fetched.map { try paths($0) } ?? []))
+        if let fetched = record.fetched { all.formUnion(try paths(command(["merge-base", record.head, fetched]))) }
+        return all.filter { GitRunner.isNotePath($0) && !$0.hasPrefix(".omega/") && ["md", "markdown", "txt"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }.sorted()
+    }
+    func checkpointPath(_ note: String) -> String { ".omega/live/" + GitDigest.of(Data(note.utf8)) + ".json" }
+    func sharedPairs() throws -> [GitSharedPair] {
+        guard let fetched = record.fetched else { return [] }
+        return try notePaths().compactMap { path in
+            let cp = checkpointPath(path)
+            guard let left = try blob(record.head, cp), let right = try blob(fetched, cp), left != right,
+                  let mine = try? JSONDecoder().decode(LiveCheckpoint.self, from: left), let incoming = try? JSONDecoder().decode(LiveCheckpoint.self, from: right),
+                  let a = try blob(record.head, path), let b = try blob(fetched, path),
+                  let mineText = String(data: a, encoding: .utf8), let incomingText = String(data: b, encoding: .utf8) else { return nil }
+            return GitSharedPair(path: path, checkpointPath: cp, mine: mine, incoming: incoming, mineText: mineText, incomingText: incomingText)
         }
-        // Push the reviewed commit, not a moving HEAD, in case another tool switches branches.
-        _ = try git(["push", "origin", target + ":" + remoteBranch], at: root, credentials: credentials)
-        return "Up to date · " + info.branch
+    }
+    func writeCandidate(_ path: String, data: Data?) throws {
+        guard let folder = workspace, GitRunner.isNotePath(path) else { throw GitFailure("Invalid sync result.") }
+        let workspace = folder.resolvingSymlinksInPath()
+        let file = workspace.appendingPathComponent(path)
+        guard file.resolvingSymlinksInPath().path == workspace.resolvingSymlinksInPath().appendingPathComponent(path).standardizedFileURL.path else { throw GitFailure("The sync result cannot replace a symbolic link.") }
+        if let data { try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true); try data.write(to: file, options: .atomic) }
+        else if fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
+        _ = try runner.git(["--literal-pathspecs", "add", "-A", "--", path], at: workspace, allowFailure: data == nil)
+    }
+    func candidate(_ path: String) throws -> Data? {
+        guard let workspace else { return try blob(record.head, path) }
+        let file = workspace.appendingPathComponent(path)
+        return fm.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
+    }
+    func conflicts() throws -> [GitReview] {
+        guard let fetched = record.fetched else { return [] }
+        let unmerged = Set(try unresolved()), notes = try notePaths()
+        let mapping = Dictionary(uniqueKeysWithValues: notes.map { (checkpointPath($0), $0) })
+        let paths = Set(unmerged.map { mapping[$0] ?? $0 }).union(record.manual.filter { !record.resolved.contains($0) }).sorted()
+        let ancestor = try command(["merge-base", record.head, fetched])
+        return try paths.map { path in
+            GitReview(path: path, mine: try blob(record.head, path), incoming: try blob(fetched, path), base: try blob(ancestor, path), checkpointPath: mapping.values.contains(path) ? checkpointPath(path) : nil)
+        }
+    }
+    func saveReview() throws {
+        let data = try JSONEncoder().encode(record)
+        try data.write(to: reviewFile, options: .atomic)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: reviewFile.path)
+        let handle = try FileHandle(forWritingTo: reviewFile); try handle.synchronize(); try handle.close()
+    }
+    // Called after the active web editor has merged the candidate in a single JS
+    // transaction. Its latest Markdown + checkpoint replace the candidate pair.
+    // Other files must still match the snapshot; otherwise the next pass retries.
+    @discardableResult func apply(activePaths: Set<String> = []) throws -> String {
+        guard try conflicts().isEmpty else { throw GitFailure("Review the conflicting copies before syncing.") }
+        guard let workspace else {
+            // A push of an immutable snapshot doesn't need to wait for typing.
+            try validate(except: Set(record.baseline.keys).union(try workingSnapshot().keys))
+            applied = true; return record.head
+        }
+        try validate(except: activePaths)
+        for path in activePaths {
+            let url = root.appendingPathComponent(path)
+            try writeCandidate(path, data: fm.fileExists(atPath: url.path) ? Data(contentsOf: url) : nil)
+        }
+        // Commit edits made during the fetch, without changing any working file.
+        try runner.commitNotes(root)
+        let local = try command(["rev-parse", "HEAD"])
+        record.head = local
+        guard try runner.git(["diff", "--quiet"], at: root, allowFailure: true).status == 0 else { throw GitChangedDuringSync() }
+        let tree = try command(["write-tree"], at: workspace)
+        var args = ["commit-tree", tree, "-p", local]
+        if let fetched = record.fetched, fetched != local { args += ["-p", fetched] }
+        args += ["-m", "Sync notes in Omega"]
+        let target: String
+        if let fetched = record.fetched, try command(["rev-parse", fetched + "^{tree}"]) == tree,
+           try runner.git(["merge-base", "--is-ancestor", local, fetched], at: root, allowFailure: true).status == 0 {
+            target = fetched // Don't manufacture reciprocal empty merges every sync interval.
+        } else { target = try command(args) }
+        _ = try command(["update-ref", "refs/omega/backups/" + UUID().uuidString, target])
+        // Git itself rejects incoming paths that would clobber an outside edit.
+        _ = try command(["merge", "--ff-only", target])
+        record.head = target; applied = true
+        try? fm.removeItem(at: reviewFile)
+        return target
+    }
+    func push(credentials: [String]) throws -> String {
+        guard applied, try command(["symbolic-ref", "--short", "HEAD"]) == record.branch,
+              try GitRemote(command(["config", "--get", "remote.origin.url"])).url == record.remoteURL else { throw GitChangedDuringSync() }
+        _ = try runner.git(["push", "origin", record.head + ":" + record.remoteBranch], at: root, credentials: credentials)
+        return "Up to date · " + record.branch
+    }
+    func discard() {
+        if let workspace { _ = try? runner.git(["worktree", "remove", "--force", workspace.path], at: root) }
+        try? fm.removeItem(at: reviewFile)
+        releaseLock()
     }
 }

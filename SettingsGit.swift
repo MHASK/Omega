@@ -9,21 +9,33 @@ import AppKit
     @Published var busy = false
     @Published var accountLoading = false
     @Published var message = ""
+    @Published var reviews: [String: [GitReview]] = [:]
+    @Published var reviewing: String?
+    @Published var syncingPath: String?
+    var sessions: [String: GitSyncSession] = [:]
+    var nextSync: [String: Date] = [:]
+    var failures: [String: Int] = [:]
+    var timer: Timer?
+    weak var notebook: Notebook?
+    let merger = GitCheckpointMerger()
+    private let storageFile: URL?
     private var file: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Folio/Git/notebooks.json")
+        if let storageFile { return storageFile }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Folio/Git/notebooks.json")
     }
-    init() {
-        if let data = try? Data(contentsOf: file), let items = try? JSONDecoder().decode([GitNotebook].self, from: data) { notebooks = items }
+    init(file: URL? = nil) {
+        storageFile = file
+        if let data = try? Data(contentsOf: self.file), let items = try? JSONDecoder().decode([GitNotebook].self, from: data) { notebooks = items }
     }
     func remember(_ value: GitNotebook) throws {
         let next = notebooks.filter { $0.path != value.path } + [value]
         try persist(next)
     }
     func disconnect(_ value: GitNotebook) {
-        do { try persist(notebooks.filter { $0 != value }); LiveCollaboration.shared.forget(folder: value.path) }
+        do { sessions.removeValue(forKey: value.path)?.discard(); reviews.removeValue(forKey: value.path); try persist(notebooks.filter { $0 != value }); LiveCollaboration.shared.forget(folder: value.path) }
         catch { message = error.localizedDescription }
     }
-    private func persist(_ next: [GitNotebook]) throws {
+    func persist(_ next: [GitNotebook]) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try DraftRecovery.write(JSONEncoder().encode(next), to: file); notebooks = next
     }
@@ -50,7 +62,7 @@ import AppKit
                 do {
                     try remember(GitNotebook(path: root.path, provider: provider))
                     messages[root.path] = info.remote.host + "/" + info.remote.project + " · " + info.branch
-                    message = "Connected. Use Sync to share your notes and attachments."
+                    message = "Connected. Notes and attachments now sync automatically."
                     notebook.loadFolder(root)
                 } catch { message = error.localizedDescription }
             case .failure(let error): message = error.localizedDescription
@@ -67,34 +79,14 @@ import AppKit
                 do {
                     try remember(GitNotebook(path: destination.path, provider: provider))
                     messages[destination.path] = remote.host + "/" + remote.project
-                    message = "Ready. Notes stay local and sync when you choose."
+                    message = "Ready. Notes stay local and sync automatically."
                     notebook.loadFolder(destination)
                 } catch { message = error.localizedDescription }
             case .failure(let error): message = error.localizedDescription
             }
         }
     }
-    func sync(_ entry: GitNotebook, notebook: Notebook) {
-        guard !busy else { return }
-        if LiveCollaboration.shared.hasSession { message = "Pause live editing before syncing this notebook with Git."; return }
-        notebook.afterSync {
-            guard notebook.save() else { return }
-            self.busy = true; notebook.gitSyncing = true; self.messages[entry.path] = "Syncing…"
-            Task {
-                let result = await Task.detached { Result {
-                    let runner = GitRunner(), info = try runner.inspect(entry.url)
-                    let credentials = try GitRunner.helperArguments(provider: entry.provider, remote: info.remote)
-                    return try runner.sync(entry.url, credentials: credentials)
-                } }.value
-                self.busy = false; notebook.gitSyncing = false
-                notebook.refreshFromDisk()
-                switch result {
-                case .success(let message): self.messages[entry.path] = message
-                case .failure(let error): self.messages[entry.path] = error.localizedDescription
-                }
-            }
-        }
-    }
+
 }
 
 // Sharing is a view onto the repository's existing permissions, never a new ACL.
@@ -204,7 +196,7 @@ struct NoteSharingView: View {
                 }
                 Text(liveEnabled ? (live.active ? (people.isEmpty ? "Just you here. Others can join this note." : people.joined(separator: ", ") + " here with you.") : live.status) : "Edit together using the same repository, branch and relay.").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).lineSpacing(3 * scale).padding(.top, 7 * scale)
                 divider
-                HStack { Text("Saved locally. Sync publishes to Git.").font(.system(size: 9 * scale)).foregroundStyle(muted); Spacer(minLength: 6); Button("Manage") { settings() }.buttonStyle(.plain) }
+                HStack { Text(entry.autoSync ? "Saved locally. Git syncs automatically." : "Saved locally. Automatic sync is off.").font(.system(size: 9 * scale)).foregroundStyle(muted); Spacer(minLength: 6); Button("Manage") { settings() }.buttonStyle(.plain) }
             }
             if !error.isEmpty { Text(error).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).padding(.top, 8); Button("Open Git settings") { settings() }.buttonStyle(.plain).padding(.top, 12) }
         }.font(.system(size: 11 * scale)).padding(16 * scale).frame(width: 300 * scale).background(Color(nsColor: Ink.paper))
@@ -277,9 +269,16 @@ struct SettingsGitView: View {
                                 Text(git.messages[item.path] ?? item.provider.rawValue + " · " + item.path).font(.system(size: 10 * scale)).foregroundStyle(muted).lineLimit(2)
                             }
                             Spacer(minLength: 8)
-                            action("Sync") { git.sync(item, notebook: notebook) }.disabled(git.busy)
-                            Menu { Button("Open notebook") { notebook.loadFolder(item.url) }; Button("Show in Finder") { NSWorkspace.shared.open(item.url) }; Divider(); Button("Disconnect") { live.leave(notebook: notebook); git.disconnect(item) } } label: { OpusIcon(glyph: "\u{f141}", size: 12 * scale) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Options for " + item.url.lastPathComponent)
-                        }.padding(16 * scale)
+                            if let conflicts = git.reviews[item.path], !conflicts.isEmpty {
+                                action("Review changes", primary: true) { git.reviewing = item.path }.disabled(git.busy)
+                            } else { action(git.syncingPath == item.path ? "Syncing…" : "Sync now") { git.sync(item, notebook: notebook) }.disabled(git.busy) }
+                            Menu { Toggle("Automatic sync", isOn: Binding(get: { item.autoSync }, set: { git.automatic(item, enabled: $0) })); Divider(); Button("Open notebook") { notebook.loadFolder(item.url) }; Button("Show in Finder") { NSWorkspace.shared.open(item.url) }; Divider(); Button("Disconnect") { live.leave(notebook: notebook); git.disconnect(item) } } label: { OpusIcon(glyph: "\u{f141}", size: 12 * scale) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Options for " + item.url.lastPathComponent)
+                        }.padding(.horizontal, 16 * scale).padding(.top, 16 * scale).padding(.bottom, 10 * scale)
+                        HStack {
+                            Toggle("Sync automatically", isOn: Binding(get: { item.autoSync }, set: { git.automatic(item, enabled: $0) })).toggleStyle(.switch).controlSize(.mini)
+                            Spacer()
+                            Text("Every 30 seconds · live editing stays on").foregroundStyle(muted)
+                        }.font(.system(size: 10 * scale)).padding(.horizontal, 16 * scale).padding(.bottom, 14 * scale)
                         if item.id != git.notebooks.last?.id { line.padding(.leading, 46 * scale) }
                     }
                 }.background(surface, in: RoundedRectangle(cornerRadius: 8 * scale)).overlay(RoundedRectangle(cornerRadius: 8 * scale).stroke(border, lineWidth: 1))
