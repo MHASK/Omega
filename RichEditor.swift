@@ -57,9 +57,9 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance { resolved = tint.usingColorSpace(.sRGB) ?? .gray }
         let accent = String(format: "#%02x%02x%02x", Int(resolved.redComponent * 255), Int(resolved.greenComponent * 255), Int(resolved.blueComponent * 255))
         let labelConfig = String(decoding: (try? JSONSerialization.data(withJSONObject: notebook.labelColors, options: [.sortedKeys])) ?? Data(), as: UTF8.self)
-        let settings = "\(theme)|\(notebook.zoom)|\(notebook.reading)|\(accent)|\(labelConfig)"
+        let settings = "\(theme)|\(notebook.zoom)|\(notebook.reading)|\(accent)|\(labelConfig)|\(notebook.writingScale)|\(notebook.writingFont)|\(notebook.writingWide)"
         if loadedID == identity && settings == lastConfiguration { revealPending(); revealItemPending(); return }
-        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors]
+        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors, "writingScale": notebook.writingScale, "writingFont": notebook.writingFont, "writingWide": notebook.writingWide, "author": NSFullUserName()]
         guard let data = try? JSONSerialization.data(withJSONObject: config), let json = String(data: data, encoding: .utf8) else { return }
         if loadedID != identity {
             LiveCollaboration.shared.stop()
@@ -160,6 +160,10 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             }
         case "cursor": if body["id"] as? String == identity { notebook.cursorLine = body["line"] as? Int ?? 1; notebook.cursorColumn = body["column"] as? Int ?? 1 }
         case "zoom": notebook.changeZoom(body["direction"] as? Int ?? 0)
+        case "writingPreferences":
+            guard body["id"] as? String == identity else { return }
+            notebook.setWriting(scale: body["scale"] as? Double, font: body["font"] as? String, wide: body["wide"] as? Bool)
+        case "writingZoom": notebook.changeWritingSize(body["direction"] as? Int ?? 0)
         case "image": chooseImage()
         case "pages":
             guard body["id"] as? String == identity, let request = body["request"] as? String, let note = notebook.selected else { return }

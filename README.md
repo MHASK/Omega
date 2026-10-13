@@ -17,11 +17,21 @@ A calm, local Markdown notes and tasks app for macOS. No account, no cloud works
 - Optional Git notebooks with existing GitHub/GitLab CLI login.
 - Optional local MCP access for tools such as Claude Code and Codex.
 
+## Writing
+
+- **Aa** at the top right changes document text size, Default / Serif / Mono typeface, and full width. The sidebar, tasks board and menus keep their own size. These are personal preferences on this Mac; `⌥⌘ +`, `⌥⌘ −` and `⌥⌘ 0` adjust/reset document size.
+- Select text for bold, italic, underline, strikethrough, links, nine soft text colors and nine highlights. The color picker has a Default option to clear each style separately.
+- Hover beside a block for **+** and a drag handle. Open the handle for type conversion, color, comments, duplication, movement, deletion, and word/character count. Drag within a list or between top-level blocks; Undo restores changes.
+- Type `/` and filter by a block or action, including `/comment`, `/blue` and `/highlight`. Use ↑ / ↓ and Return. Type `@` to link a note, task, goal, or a collaborator currently present in the live session. Person mentions are references, not notifications.
+- Select text and choose **Comment** (`⌥⌘M`) or use the block menu. The comment button shows open threads, replies, and resolved threads. Text anchors move with edits. If the anchored text is removed, the thread and its original quote remain in the comments panel.
+
+Colors and underline use small, allowlisted inline HTML tags in Markdown. Comments use inline anchors and hidden `omega-comment` records in the same local file, so Git saves them too. Comment records merge as separate items in live editing; concurrent replies are retained. Use the latest Omega on every collaborating Mac for the new formatting schema. Font preferences stay local. Other Markdown readers may display the tags differently, but the underlying text remains available. No AI service or notification service is involved.
+
 ## Install and update
 
-Unzip the release and move **Omega.app** to Applications. The current distribution is Developer ID signed. Releases are not notarized unless their release notes say so; macOS may require first-open approval in Privacy & Security.
+Open the release **DMG** and drag **Omega.app** to **Applications**, then launch it from Applications. Starting with 1.3.2, official releases are Developer ID signed, notarized by Apple, and include stapled notarization tickets. The ZIP contains the same app for the automatic updater and manual installation.
 
-Omega checks GitHub releases on launch and every six hours, downloads newer versions, and shows a small dot on Settings when an update is ready. Choose **Settings → About Omega → Restart to update**. You can also use **Omega → Check for Updates**. Automatic checks and downloads can be turned off in Settings.
+Automatic update checks and downloads are **on by default in every DMG and ZIP installation**. Omega checks GitHub releases on launch when the last check is more than six hours old, and every six hours while running. It downloads newer versions and shows a small dot on Settings when an update is ready. Choose **Settings → About Omega → Restart to update**. You can also use **Omega → Check for Updates**. Automatic checks and downloads can be turned off in Settings; an update preserves your preference.
 
 Every download is checked against its SHA-256 checksum, then verified against the application's bundle identity and Developer ID signing team. Omega saves your current work, backs up notes, preferences, undo/recovery data and the old app, and replaces the application. It does not move your notebooks or change their format. Downgrades and incompatible or tampered apps are rejected. A manual “Install Update from File” fallback is available.
 
@@ -81,14 +91,14 @@ Tests use temporary notes and isolated preferences. GitHub Actions runs editor a
 
 ## Publish a release
 
-The maintainer publishes from a Mac with the official Developer ID certificate. Signing credentials stay in Keychain, not in GitHub or the repository.
+The maintainer publishes from a Mac with the official Developer ID certificate. Signing credentials stay in Keychain. Notarization credentials come from an existing Keychain profile or the process environment, never GitHub or the repository.
 
 1. Build editor resources and run the checks above.
-2. Run `./release.sh 1.2.0 120 /absolute/release/path` with a higher version and build number. Set `FOLIO_SIGN_IDENTITY` to the signing identity if needed. To notarize, set `FOLIO_NOTARY_PROFILE` to an existing Keychain profile before running it.
+2. Set `FOLIO_NOTARY_PROFILE` to an existing Keychain notarization profile, or supply `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID` through the environment. Run `./release.sh 1.3.2 132 /absolute/release/path` with a higher version and build number. Set `FOLIO_SIGN_IDENTITY` to the signing identity if needed. Notarization is mandatory: the script notarizes and staples both the app and DMG, and validates them with Gatekeeper before producing the update manifest.
 3. Review and commit the version changes, then push `main`.
 4. Run `./publish.sh /absolute/release/path /absolute/release-notes.md`.
 
-The script validates the signed app and its manifest, uploads the archive, checksum and `Omega-update.json` as a draft GitHub release, then publishes it. Installed copies discover it automatically. Build checks never receive signing keys or publish unsigned updates.
+The publish script requires valid signatures and stapled notarization tickets, verifies checksums, then uploads the DMG, update ZIP, checksums and `Omega-update.json` as a draft GitHub release before publishing it. Installed copies discover it automatically. Build checks never receive signing keys or publish unsigned updates. Do not replace assets of a published release; ship a higher version/build instead.
 
 Forks should use their own repository, app identity and signing requirement before distributing their own update channel.
 

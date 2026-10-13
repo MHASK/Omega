@@ -10,6 +10,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import katex from 'katex';
 import { PageLink } from './page-links.js';
+import {TextColor,Highlight,Underline,CommentAnchor,CommentRecord,withoutWritingMarkup} from './writing-schema.js';
 
 // Empty notes get an editable outline, while the editor retains the original
 // empty file until the user actually writes. Placeholders are never saved.
@@ -50,7 +51,7 @@ export function visualMarkdown(text) {
 
 // Extended dialects open losslessly in source mode; never silently discard them.
 export function needsSource(markdown) {
-  const withoutCode = visualMarkdown(markdown).replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm, '').replace(/`[^`\n]*`/g, '');
+  const withoutCode = withoutWritingMarkup(visualMarkdown(markdown)).replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm, '').replace(/`[^`\n]*`/g, '');
   return /^ {0,3}(?:`{3,}|~{3,})[ \t]*database(?:\s|$)/mi.test(markdown)
     || /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\n|$)/.test(markdown)
     || /<!--|<\/?[a-z][\w-]*(?:\s[^>]*|\s*\/?)>/i.test(withoutCode)
@@ -133,7 +134,7 @@ function mathNode(block) {
 
 export function extensions({nativeHistory = false} = {}) {
   return [
-    StarterKit.configure({ undoRedo: nativeHistory ? false : {}, codeBlock: false, underline: false, trailingNode: false, link: false }), PageLink,
+    StarterKit.configure({ undoRedo: nativeHistory ? false : {}, codeBlock: false, underline: false, trailingNode: false, link: false }), PageLink, TextColor, Highlight, Underline, CommentAnchor, CommentRecord,
     Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
     Table.configure({ resizable: true, lastColumnResizable: false, cellMinWidth: 90 }), TableRow,
     TableHeader.extend({ content: 'paragraph' }), TableCell.extend({ content: 'paragraph' }),

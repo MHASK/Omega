@@ -233,6 +233,16 @@ final class Notebook: ObservableObject {
     static let defaultZoom = 1.4
     @Published var zoom = UserDefaults.standard.object(forKey: "documentZoom") as? Double ?? Notebook.defaultZoom
 
+    @Published var writingScale = min(1.8, max(0.8, UserDefaults.standard.object(forKey: "writingScale") as? Double ?? 1))
+    @Published var writingFont = UserDefaults.standard.string(forKey: "writingFont") ?? "default"
+    @Published var writingWide = UserDefaults.standard.bool(forKey: "writingWide")
+    func setWriting(scale: Double? = nil, font: String? = nil, wide: Bool? = nil) {
+        if let scale, scale.isFinite { writingScale = min(1.8, max(0.8, scale)); UserDefaults.standard.set(writingScale, forKey: "writingScale") }
+        if let font, ["default", "serif", "mono"].contains(font) { writingFont = font; UserDefaults.standard.set(font, forKey: "writingFont") }
+        if let wide { writingWide = wide; UserDefaults.standard.set(wide, forKey: "writingWide") }
+    }
+    func changeWritingSize(_ direction: Int) { setWriting(scale: direction == 0 ? 1 : (writingScale * 10 + Double(direction)).rounded() / 10) }
+
     func changeZoom(_ direction: Int) {
         zoom = direction == 0 ? Self.defaultZoom : min(2.5, max(0.7, (zoom * 10 + Double(direction)).rounded() / 10))
         UserDefaults.standard.set(zoom, forKey: "documentZoom")

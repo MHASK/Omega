@@ -31,3 +31,5 @@ jobs:
       - run: '"$RUNNER_TEMP/WebLiveCheck" "$PWD/Resources"'
       - run: xcrun swiftc -parse-as-library Tests/WebPresenceCheck.swift -o "$RUNNER_TEMP/WebPresenceCheck" -framework AppKit -framework WebKit
       - run: OMEGA_NODE="$(command -v node)" "$RUNNER_TEMP/WebPresenceCheck" "$PWD/Resources"
+      - run: xcrun swiftc -parse-as-library Tests/WebWritingCheck.swift -o "$RUNNER_TEMP/WebWritingCheck" -framework AppKit -framework WebKit
+      - run: '"$RUNNER_TEMP/WebWritingCheck" "$PWD/Resources" "$RUNNER_TEMP"'

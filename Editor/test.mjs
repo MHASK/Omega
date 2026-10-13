@@ -378,3 +378,8 @@ assert.equal(pageRing().dataset.progress,'0');assert.equal(pageRing().title,'No 
 console.log('PASS: whole-project progress counts every saved task/subtask once, omits drafts/goals, respects custom statuses and stays current after edits, moves and refresh.');
 import {testLive} from './live-test.mjs';
 testLive();
+
+import {runWritingTests} from './writing-test.mjs';
+runWritingTests();
+import {runWritingCollaborationTests} from './writing-test.mjs';
+runWritingCollaborationTests();

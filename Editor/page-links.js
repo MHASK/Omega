@@ -6,6 +6,8 @@ export function isPageHref(href) {
   catch { return false; }
 }
 
+export function isPersonHref(href){try{return typeof href==='string'&&href.startsWith('#omega-person-')&&decodeURIComponent(href.slice(14)).length>0&&decodeURIComponent(href.slice(14)).length<=80;}catch{return false;}}
+export function liveMentions(states){const names=new Set();for(const state of states||[]){const name=state?.user?.name;if(typeof name==='string'&&name.trim()&&name.length<=80)names.add(name);}return [...names].map(name=>({name:'@'+name,location:'Live collaborator · reference only',href:'#omega-person-'+encodeURIComponent(name),kind:'person'}));}
 export function itemLinkKind(href){return isPageHref(href)?href.match(/#folio-(task|goal)-[\w-]+$/)?.[1]||null:null;}
 export const PageLink = Link.extend({
   renderHTML(props) {
@@ -16,6 +18,7 @@ export const PageLink = Link.extend({
       if(kind)rendered[1]['data-item-link']=kind;
       rendered[1].title = kind?'Open linked '+kind:'Open linked note';
     }
+    if(isPersonHref(rendered[1].href)){rendered[1]['data-omega-person']='';rendered[1].title='Collaborator reference';}
     return rendered;
   },
 }).configure({openOnClick:false,autolink:true,defaultProtocol:'https'});
@@ -31,7 +34,7 @@ export function matchingPages(pages, query) {
 // The saved range is only applied if the document has not changed underneath
 // the picker. Choosing a page is one normal, undoable Markdown edit.
 export function insertPageLink(editor, page, range, doc, preserveText=false) {
-  if (!editor?.isEditable || !editor.state.doc.eq(doc) || !isPageHref(page.href)) return false;
+  if (!editor?.isEditable || !editor.state.doc.eq(doc) || !(isPageHref(page.href)||isPersonHref(page.href))) return false;
   const chain=editor.chain().focus().setTextSelection(range);
   if (preserveText && range.from!==range.to) return chain.setLink({href:page.href}).run();
   return chain.insertContent({type:'text',text:page.name,marks:[{type:'link',attrs:{href:page.href}}]})
@@ -53,7 +56,7 @@ export class PagePicker {
     };
     element.querySelector('[data-close]').onclick=()=>{this.close();this.onClose();};
   }
-  open(kind='page') {this.kind=kind;this.pages=[];this.ready=false;this.input.value='';this.input.placeholder=kind==='goal'?'Link to a goal…':kind==='task'?'Link to a task or subtask…':kind==='all'?'Link to a page, task, or goal…':'Link to a page…';this.input.setAttribute('aria-label',this.input.placeholder);this.element.setAttribute('aria-label',this.input.placeholder);this.element.hidden=false;this.render();}
+  open(kind='page') {this.kind=kind;this.pages=[];this.ready=false;this.input.value='';this.input.placeholder=kind==='mention'?'Mention a page or live collaborator…':kind==='goal'?'Link to a goal…':kind==='task'?'Link to a task or subtask…':kind==='all'?'Link to a page, task, or goal…':'Link to a page…';this.input.setAttribute('aria-label',this.input.placeholder);this.element.setAttribute('aria-label',this.input.placeholder);this.element.hidden=false;this.render();}
   close() {this.element.hidden=true;}
   setPages(pages) {this.pages=pages;this.ready=true;this.render();}
   render() {
@@ -65,7 +68,7 @@ export class PagePicker {
     }
     this.items.forEach((page,index)=>{
       const button=document.createElement('button');button.type='button';button.tabIndex=-1;button.setAttribute('role','option');button.id=`page-option-${index}`;
-      const icon=document.createElement('span');icon.className='icon';icon.textContent=page.kind==='goal'?'\uf11e':page.kind==='subtask'?'\uf0c5':page.kind==='task'?'\uf0ae':'\uf15b';icon.setAttribute('aria-hidden','true');
+      const icon=document.createElement('span');icon.className='icon';icon.textContent=page.kind==='person'?'\uf007':page.kind==='goal'?'\uf11e':page.kind==='subtask'?'\uf0c5':page.kind==='task'?'\uf0ae':'\uf15b';icon.setAttribute('aria-hidden','true');
       const label=document.createElement('span');label.className='page-result-label';
       const name=document.createElement('span');name.textContent=page.name;
       const location=document.createElement('small');location.textContent=page.location;

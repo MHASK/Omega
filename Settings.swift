@@ -162,6 +162,19 @@ struct FolioSettingsView: View {
                     VStack(spacing: 12 * scale) { ForEach(["system", "light", "dark"], id: \.self) { themeChoice($0) } }
                 }
             }
+            card("Document text", subtitle: "Change your writing size and typeface. Sidebar and controls keep their size.") {
+                Picker("Typeface", selection: Binding(get: { notebook.writingFont }, set: { notebook.setWriting(font: $0) })) {
+                    Text("Default").tag("default"); Text("Serif").tag("serif"); Text("Mono").tag("mono")
+                }.pickerStyle(.segmented)
+                HStack(spacing: 10 * scale) {
+                    Text("Text size"); Spacer(minLength: 12)
+                    Button { notebook.changeWritingSize(-1) } label: { Image(systemName: "minus").frame(width: 20 * scale, height: 20 * scale) }.accessibilityLabel("Smaller document text").disabled(notebook.writingScale <= 0.8)
+                    Text("\(Int((notebook.writingScale * 100).rounded()))%").monospacedDigit().frame(minWidth: 42 * scale)
+                    Button { notebook.changeWritingSize(1) } label: { Image(systemName: "plus").frame(width: 20 * scale, height: 20 * scale) }.accessibilityLabel("Larger document text").disabled(notebook.writingScale >= 1.8)
+                }
+                Toggle("Wide documents", isOn: Binding(get: { notebook.writingWide }, set: { notebook.setWriting(wide: $0) })).toggleStyle(.switch)
+                Text("⌥⌘ + and ⌥⌘ − · Also available from Aa on any note.").font(.system(size: 10 * scale)).foregroundStyle(muted)
+            }
             card("Interface size", subtitle: "Adjust the text and controls across the whole app.") {
                 HStack(spacing: 10 * scale) {
                     Button { notebook.changeZoom(-1) } label: { Image(systemName: "minus").frame(width: 20 * scale, height: 20 * scale) }.accessibilityLabel("Smaller interface").disabled(notebook.zoom <= 0.7)

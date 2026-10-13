@@ -164,6 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let format = NSMenu(title: "Format")
         add(format, "Bold", #selector(bold), "b")
         add(format, "Italic", #selector(italic), "i")
+        add(format, "Underline", #selector(underline), "u")
+        add(format, "Add Comment…", #selector(addComment), "m", modifiers: [.command, .option])
         add(format, "Heading", #selector(heading), "2", modifiers: [.command, .option])
         add(format, "Checklist", #selector(checklist), "l", modifiers: [.command, .shift])
         top(main, "Format", format)
@@ -174,6 +176,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.items.last?.allowsKeyEquivalentWhenHidden = true
         add(view, "Zoom Out", #selector(zoomOut), "-")
         add(view, "Default Size", #selector(zoomReset), "0")
+        view.addItem(.separator())
+        add(view, "Larger Document Text", #selector(writingLarger), "=", modifiers: [.command, .option])
+        add(view, "Larger Document Text", #selector(writingLarger), "+", modifiers: [.command, .option])
+        view.items.last?.isHidden = true
+        view.items.last?.allowsKeyEquivalentWhenHidden = true
+        add(view, "Smaller Document Text", #selector(writingSmaller), "-", modifiers: [.command, .option])
+        add(view, "Default Document Text", #selector(writingReset), "0", modifiers: [.command, .option])
         view.addItem(.separator())
         add(view, "Toggle Markdown Source", #selector(sourceMode), "m", modifiers: [.command, .shift])
         add(view, "Toggle Sidebar", #selector(sidebar), "\\")
@@ -201,6 +210,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func newTaskPage() { notebook.newTaskPage() }
     @objc func newNotebook() { notebook.newNotebook() }
     @objc func newFolder() { notebook.newFolder() }
+    @objc func underline() { notebook.richEditor?.command("underline") }
+    @objc func addComment() { notebook.richEditor?.command("comment") }
+    @objc func writingLarger() { notebook.changeWritingSize(1) }
+    @objc func writingSmaller() { notebook.changeWritingSize(-1) }
+    @objc func writingReset() { notebook.changeWritingSize(0) }
     @objc func zoomIn() { notebook.changeZoom(1) }
     @objc func zoomOut() { notebook.changeZoom(-1) }
     @objc func zoomReset() { notebook.changeZoom(0) }
