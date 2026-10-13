@@ -48,6 +48,30 @@ struct FolioMain {
         if CommandLine.arguments.contains("--self-test") { runSelfTests(); return }
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
+        // A requested move runs only on its designated update, before any
+        // editor, file watcher, Git session or assistant can open old paths.
+        let migration = NotebookMigration()
+        do {
+            if let request = try migration.due(build: Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0) {
+                // The headless updater helper may still be waiting for this
+                // launch; only another interactive app can have editors open.
+                guard NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "local.folio.notes").allSatisfy({ $0.processIdentifier == getpid() || $0.activationPolicy == .prohibited }) else {
+                    let alert = NSAlert(); alert.messageText = "Close the other Omega window first"
+                    alert.informativeText = "Omega needs to finish your requested notebook move before opening this version."; alert.runModal(); return
+                }
+                do { try migration.run(build: request.minimumBuild) }
+                catch {
+                    let alert = NSAlert(); alert.messageText = "The notebook move needs attention"
+                    alert.informativeText = error.localizedDescription; alert.runModal()
+                    // Once renamed, finish path migration before creating any
+                    // stores. Retry on next launch; never seed a second notebook.
+                    if !FileManager.default.fileExists(atPath: request.source) { return }
+                }
+            }
+        } catch {
+            let alert = NSAlert(); alert.messageText = "Couldn’t read the pending notebook move"
+            alert.informativeText = error.localizedDescription; alert.runModal(); return
+        }
         let delegate = AppDelegate()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }

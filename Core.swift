@@ -113,6 +113,9 @@ enum NoteFiles {
             if destination.path == oldRoot.path || destination.path.hasPrefix(oldRoot.path + "/") {
                 destination = URL(fileURLWithPath: newRoot.path + String(destination.path.dropFirst(oldRoot.path.count)))
             }
+            // Preserve spelling (./, percent escapes, etc.) when a relative
+            // link already resolves correctly at the new location.
+            if newFile.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL == destination { continue }
             var originParts = newFile.deletingLastPathComponent().standardizedFileURL.pathComponents
             var targetParts = destination.pathComponents
             while !originParts.isEmpty && !targetParts.isEmpty && originParts.first == targetParts.first { originParts.removeFirst(); targetParts.removeFirst() }
