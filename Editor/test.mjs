@@ -442,3 +442,6 @@ for(const target of [one.from,one.from+2,one.to,-1,safeBefore.content.size+1])as
 assert(safeMove.state.doc.eq(safeBefore));
 safeMove.commands.insertContent('Changed');const movedStale=safeMove.state.doc;assert.equal(moveBlock(safeMove,one,movedStale.content.size),false);assert(safeMove.state.doc.eq(movedStale));safeMove.destroy();
 console.log('PASS: block moves preserve nested content and formatting, remove empty lists, move across lists and tables, save/reopen, reject stale/invalid positions, and undo/redo in one step.');
+
+import {runExternalTests} from './external-test.mjs';
+runExternalTests();

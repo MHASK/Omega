@@ -323,3 +323,6 @@ input:is([type=checkbox],[type=radio]):disabled{cursor:default;opacity:.55}
 .block-drop-guide{border-radius:2px;box-shadow:0 0 0 1px var(--paper)}
 .block-drop-guide::before{content:'';position:absolute;left:-3px;top:-2px;width:6px;height:6px;border-radius:50%;background:var(--writing-accent)}
 .block-drag-status{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* Temporary peer-edit feedback; never serialized into Markdown. */
+.external-edit-highlight{background:color-mix(in srgb,var(--accent,#b7a2cf) 16%,transparent);border-radius:2px;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent,#b7a2cf) 38%,transparent);text-underline-offset:4px}

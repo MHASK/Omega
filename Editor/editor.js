@@ -1,3 +1,4 @@
+import {mergeExternal,patchRichDocument,ExternalEditHighlight,externalEditKey} from './external-edits.js';
 import {mergeGitCheckpoints} from './git-checkpoints.js';
 import {LiveEditor} from './live-editor.js';
 import {configureLabelColors} from './task-labels.js';
@@ -21,6 +22,7 @@ let taskMode = false, live = null;
 let editor, identity = '', original = '', initialDoc, sourceMode = false, forcedSource = false, loading = false, readOnly = false;
 let slashRange = null, dismissedSlash = null, entryCallback, lastScale = 1, toastTimer;
 const scroller = $('scroller'), bubble = $('bubble'), slash = $('slash'), tableTools = $('table-tools'), source = $('source');
+let externalHighlightTimer;
 let beforeSelection = '', typingEdit = false;
 let edgeTable = null, pageRequest = null, dismissedPage = null, pageSequence = 0;
 const writing=new WritingTools({editor:()=>editor,hideMenus:()=>{hideMenus();blocks.close();},preferences:values=>send('writingPreferences',{id:identity,...values}),state:values=>send('writingState',{id:identity,...values})});
@@ -252,7 +254,7 @@ function keyDown(view,event){
 }
 function createEditor(text,shared=null){
  writing.reset();blocks.reset();editor?.destroy();$('editor').replaceChildren();
- editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch,...(shared?shared.extensions():[])],...(shared?{}:noteContent(text)),editable:!readOnly&&!undoHistory.busy,
+ editor=new Editor({element:$('editor'),extensions:[...extensions({nativeHistory:true}),SearchMatch,ExternalEditHighlight,...(shared?shared.extensions():[])],...(shared?{}:noteContent(text)),editable:!readOnly&&!undoHistory.busy,
   editorProps:{attributes:{role:'textbox','aria-label':'Note body','aria-multiline':'true',spellcheck:'true'},handleKeyDown:keyDown,
    handlePaste(view,event){
     const text=event.clipboardData?.getData('text/plain');const html=event.clipboardData?.getData('text/html');
@@ -406,11 +408,38 @@ window.folio={
  revealItem(config){return config.id===identity&&taskMode&&taskPage.revealItem(config.item,config.kind);},
  pageResults(result){if(result.id===identity&&result.request===pageRequest?.request&&!pagePicker.element.hidden){pagePicker.setPages([...(pageRequest.kind==='mention'?liveMentions(live?.presence.awareness.getStates().values()):[]),...(result.pages||[])]);const rect=pageRequest.rect;place(pagePicker.element,rect.left,rect.bottom);if(rect.bottom+pagePicker.element.offsetHeight+8>innerHeight)place(pagePicker.element,rect.left,rect.top,true);}},
  historyResult(result){undoHistory.result(result);},
+ applyExternal(config){
+  if(config.id!==identity)return {status:'deferred'};
+  const current=value(),merged=mergeExternal(config.base,current,config.text);
+  if(merged===null)return {status:'conflict'};
+  if(!this.replaceForAssistant({id:identity,expected:current,text:merged,activity:true}))return {status:'deferred'};
+  return {status:'applied',text:value()};
+ },
  replaceForAssistant(config){
   if(config.id!==identity || config.expected!==value() || taskPage.busy || undoHistory.busy || writing.busy || !blocks.menu.hidden || editor?.view.composing || !$('entry').hidden || !pagePicker.element.hidden)return false;
   // Compare and replace in one JavaScript turn. A keystroke cannot land between them.
-  if(live?.kind==='rich'){if(parseTasks(config.text)||needsSource(config.text))return false;try{const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),current=editor.state.doc,start=current.content.findDiffStart(next.content);if(start!==null){const end=current.content.findDiffEnd(next.content);let a=end.a,b=end.b;if(a<start){b+=start-a;a=start;}if(b<start){a+=start-b;b=start;}editor.view.dispatch(editor.state.tr.replace(start,a,next.slice(start,b)));}return true;}catch{return false;}}
+  if(!taskMode&&!sourceMode&&!parseTasks(config.text)&&!needsSource(config.text)){
+   try{
+    const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),scroll=scroller.scrollTop;
+    beforeSelection=selectionState();typingEdit=false;
+    loading=true;
+    patchRichDocument(editor,next,{highlight:!!config.activity});
+    if(!live){original=config.text;initialDoc=editor.state.doc;}
+    loading=false;scroller.scrollTop=scroll;emitChange();
+    if(config.activity){clearTimeout(externalHighlightTimer);const activeEditor=editor;externalHighlightTimer=setTimeout(()=>{if(editor===activeEditor&&!editor.isDestroyed)editor.view.dispatch(editor.state.tr.setMeta(externalEditKey,null).setMeta('addToHistory',false));},4500);}
+    return true;
+   }catch{loading=false;return false;}
+  }
+  if(live?.kind==='rich')return false;
   if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
+  if(sourceMode&&!live){
+   const previous=source.value,start=source.selectionStart,end=source.selectionEnd,scroll=source.scrollTop;
+   // A textarea has UTF-16 positions, just like the prefix/suffix comparison.
+   let prefix=0;while(prefix<previous.length&&prefix<config.text.length&&previous[prefix]===config.text[prefix])prefix++;
+   let suffix=0;while(suffix<previous.length-prefix&&suffix<config.text.length-prefix&&previous.at(-suffix-1)===config.text.at(-suffix-1))suffix++;
+   const map=p=>p<=prefix?p:p>=previous.length-suffix?p+config.text.length-previous.length:prefix;
+   beforeSelection=selectionState();typingEdit=false;source.value=config.text;source.setSelectionRange(map(start),map(end));source.scrollTop=scroll;emitChange();return true;
+  }
   const scroll=scroller.scrollTop, sourceScroll=source.scrollTop;
   const selection=editor?.state.selection.from || 1;
   if(taskMode || parseTasks(config.text) || sourceMode || needsSource(config.text)){

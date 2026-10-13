@@ -96,6 +96,15 @@ struct DocumentToolbar: View {
     private var scale: CGFloat { min(CGFloat(notebook.zoom), 1.5) }
     var body: some View {
         HStack(spacing: 3 * scale) {
+            if let activity = notebook.updateActivity, activity.file == notebook.selected {
+                Button { if activity.message == "Outside edits need review" { notebook.reviewOutsideEdits() } } label: {
+                    HStack(spacing: 5 * scale) {
+                        Image(systemName: activity.pending ? "arrow.triangle.2.circlepath" : "checkmark.circle")
+                        Text(activity.message).lineLimit(1).truncationMode(.middle)
+                    }.font(.system(size: 10 * scale)).padding(.horizontal, 6 * scale)
+                }.help(activity.message == "Outside edits need review" ? "Review the outside changes. Both versions are preserved." : "Updates appear here as they arrive. Highlighted text shows the latest edit.")
+                    .accessibilityLabel(activity.message)
+            }
             if !notebook.text.hasPrefix(TaskDocument.marker) {
                 if !notebook.documentIsSource {
                     Button { sharing = false; notebook.richEditor?.command("comments") } label: {

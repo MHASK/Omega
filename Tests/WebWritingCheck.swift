@@ -118,6 +118,11 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
             try check(try await js(0,"document.querySelectorAll('[data-omega-color=blue]').length") as! Int > 0,"formatted Markdown reopens as visual text")
             try check(try await js(0,"document.querySelector('.note-tools button[data-count]').dataset.count") as! String == "1","comment survives reload")
             try await join(0);try await join(1)
+            let assistantBase=try await text(0),assistantNext=assistantBase.replacingOccurrences(of:"Good ideas",with:"Thoughtful ideas")
+            let assistantApplied=try await js(0,"window.folio.replaceForAssistant(\(json(["id":"live","expected":assistantBase,"text":assistantNext,"activity":true])))") as! Bool
+            try await settle()
+            let assistantLeft=try await text(0),assistantRight=try await text(1)
+            try check(assistantApplied && assistantLeft == assistantRight,"assistant updates converge in both live WebKit editors without leaving the session")
             sharing=false
             try await select(0,"next chapter");_ = try await js(0,"window.folio.command('color');true");try await click(0,"[aria-label='Text colors']");try await click(0,"[aria-label='Green text']")
             try await select(1,"new paragraph");_ = try await js(1,"window.folio.command('comment');true");try await settle()

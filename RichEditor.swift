@@ -119,13 +119,25 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     }
     func replaceForAssistant(expected: String, text: String, completion: @escaping (Result<Void, Error>) -> Void) {
         guard ready, loadedReadyID == identity, let webView else { completion(.failure(AssistantError("The editor is loading. Retry shortly."))); return }
-        let config = ["id": identity, "expected": expected, "text": text]
+        let requestedID = identity
+        let config: [String: Any] = ["id": requestedID, "expected": expected, "text": text, "activity": true]
         let data = try! JSONSerialization.data(withJSONObject: config)
         let json = String(decoding: data, as: UTF8.self)
-        webView.evaluateJavaScript("window.folio.replaceForAssistant(\(json))") { result, error in
-            if let error { completion(.failure(error)) }
+        webView.evaluateJavaScript("window.folio.replaceForAssistant(\(json))") { [weak self] result, error in
+            if self?.identity != requestedID { completion(.failure(AssistantError("The selected note changed. Read the note again before editing."))) }
+            else if let error { completion(.failure(error)) }
             else if result as? Bool == true { completion(.success(())) }
             else { completion(.failure(AssistantError("Conflict: the note changed or is in an active editing dialog. Read it again before updating."))) }
+        }
+    }
+    func applyExternal(base: String, text: String, completion: @escaping ([String: Any]) -> Void) {
+        guard ready, loadedReadyID == identity, let webView else { completion(["status": "deferred"]); return }
+        let requestedID = identity
+        let config = ["id": requestedID, "base": base, "text": text]
+        let json = String(decoding: try! JSONSerialization.data(withJSONObject: config), as: UTF8.self)
+        webView.evaluateJavaScript("window.folio.applyExternal(\(json))") { [weak self] value, _ in
+            guard self?.identity == requestedID else { completion(["status": "deferred"]); return }
+            completion(value as? [String: Any] ?? ["status": "deferred"])
         }
     }
     func command(_ command: String) {

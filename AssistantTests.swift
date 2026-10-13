@@ -12,9 +12,9 @@ import Foundation
         let store = Notebook(recovery: DraftRecovery(directory: base.appendingPathComponent("Recovery")))
         store.root = root; store.notebooks = [root]
         let service = AssistantService(store, history: base.appendingPathComponent("History"))
-        func call(_ name: String, _ args: [String: Any] = [:], fails: Bool = false) -> [String: Any] {
+        func call(_ name: String, _ args: [String: Any] = [:], fails: Bool = false, client: String = "Assistant") -> [String: Any] {
             var response: [String: Any]?
-            service.handle(["name": name, "arguments": args]) { response = $0 }
+            service.handle(["name": name, "arguments": args, "clientName": client]) { response = $0 }
             precondition(response != nil, "Synchronous fixture unexpectedly deferred")
             precondition(response!["isError"] as? Bool == fails, String(describing: response))
             return response!["structuredContent"] as? [String: Any] ?? [:]
@@ -158,8 +158,12 @@ import Foundation
         let latest = call("read_note", ["path": visible.path])
         precondition(latest["markdown"] as? String == store.text)
         _ = call("rename_item", ["path": visible.path, "name": "Changed", "expected_revision": latest["revision"]!], fails: true)
-        _ = call("update_note", ["path": visible.path, "expected_revision": latest["revision"]!, "markdown": "# Together\n"])
+        _ = call("update_note", ["path": visible.path, "expected_revision": latest["revision"]!, "markdown": "# Together\n"], client: "claude-code")
         precondition(store.text == "# Together\n")
+        precondition(store.updateActivity?.message == "Updated by Claude")
+        precondition(FolioMCP.displayName("codex-mcp-client") == "Codex")
+        precondition(FolioMCP.displayName("unknown\nClaude’s friend") == "Claude")
+        precondition(FolioMCP.displayName(nil) == "Assistant")
         // A stale assistant cannot override a dirty human draft or an outside edit.
         store.edit("# Human again\n")
         _ = call("update_note", ["path": visible.path, "expected_revision": latest["revision"]!, "markdown": "wrong"], fails: true)
@@ -172,6 +176,22 @@ import Foundation
         let newBook = call("create_notebook", ["beside": root.path, "name": "Other book"])
         precondition(store.roots.count == 2 && newBook["kind"] as? String == "folder")
         _ = call("create_notebook", ["beside": root.path, "name": "Other book"], fails: true)
+        let watched = root.appendingPathComponent("Watched.md")
+        try "# Watch\n".write(to: watched, atomically: true, encoding: .utf8)
+        store.select(watched)
+        for (index, atomic) in [true, true, false].enumerated() {
+            let expected = "# Outside update \(index)\n"
+            let started = Date()
+            try expected.write(to: watched, atomically: atomic, encoding: .utf8)
+            while store.text != expected && Date().timeIntervalSince(started) < 1 {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.015))
+            }
+            precondition(store.text == expected, "Filesystem notification did not refresh the open note within one second")
+            precondition(store.updateActivity?.message == "Updated externally")
+        }
+        store.select(visible)
+        precondition(store.updateActivity == nil, "Activity leaked to another note")
+        print("PASS: named MCP update activity, sub-second external file updates, repeated atomic replacement, in-place writes, and note-switch activity cleanup")
         print("PASS: assistant scope, symlink/hidden-path rejection, schema validation, Unicode CRUD, version conflicts, history, shared drafts, collision protection, folders, rename/move, search, notebooks")
     } catch { fputs("Assistant tests failed: \(error)\n", stderr); exit(1) }
 }

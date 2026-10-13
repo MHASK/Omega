@@ -2,6 +2,45 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+// Watch the file and its directory: editors commonly save by replacing the
+// inode. Re-arm the file watch after every directory event, with polling as a
+// fallback for volumes that don't deliver filesystem notifications.
+@MainActor final class OpenNoteWatcher {
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var pending: DispatchWorkItem?
+    deinit { pending?.cancel(); sources.forEach { $0.cancel() } }
+    func stop() { pending?.cancel(); pending = nil; sources.forEach { $0.cancel() }; sources = [] }
+    func watch(_ url: URL?, changed: @escaping () -> Void) {
+        stop(); guard let url else { return }
+        for target in [url, url.deletingLastPathComponent()] {
+            let fd = open(target.path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend, .attrib], queue: .main)
+            source.setCancelHandler { close(fd) }
+            source.setEventHandler { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.pending?.cancel()
+                    let work = DispatchWorkItem { [weak self] in
+                        self?.watch(url, changed: changed)
+                        changed()
+                    }
+                    self.pending = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+                }
+            }
+            sources.append(source); source.resume()
+        }
+    }
+}
+
+struct NoteUpdateActivity: Equatable {
+    let id = UUID()
+    let file: URL
+    let message: String
+    let pending: Bool
+}
+
 struct LibraryPreferences: Codable {
     var favorites: Set<String> = []
     var archived: Set<String> = []
@@ -159,7 +198,26 @@ final class Notebook: ObservableObject {
         return query.isEmpty ? contents : NoteFiles.flatten(contents).filter { !$0.isFolder && $0.name.localizedCaseInsensitiveContains(query) }
     }
     @Published var entries: [NoteEntry] = []
-    @Published var selected: URL?
+    @Published var selected: URL? {
+        didSet {
+            guard oldValue != selected else { return }
+            updateActivity = nil; externalConflict = false
+            fileWatcher.watch(selected) { [weak self] in self?.refreshFromDisk(reload: false) }
+        }
+    }
+    @Published var updateActivity: NoteUpdateActivity?
+    private let fileWatcher = OpenNoteWatcher()
+    private var externalConflict = false
+    func showUpdate(_ message: String, at file: URL, pending: Bool = false) {
+        guard selected == file else { return }
+        let activity = NoteUpdateActivity(file: file, message: message, pending: pending)
+        updateActivity = activity
+        if !pending {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                if self?.updateActivity?.id == activity.id { self?.updateActivity = nil }
+            }
+        }
+    }
     @Published var text = ""
     @Published var documentComments = 0
     @Published var documentIsSource = false
@@ -410,7 +468,7 @@ final class Notebook: ObservableObject {
             }
         }
         saveTask?.cancel()
-        let task = DispatchWorkItem { [weak self] in _ = self?.save() }
+        let task = DispatchWorkItem { [weak self] in _ = self?.save(automatically: true) }
         saveTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: task)
     }
@@ -458,8 +516,9 @@ final class Notebook: ObservableObject {
     }
 
     @discardableResult
-    func save() -> Bool {
+    func save(automatically: Bool = false) -> Bool {
         saveTask?.cancel()
+        if checking { return false }
         guard dirty, let url = selected else { return true }
         do {
             guard FileManager.default.fileExists(atPath: url.path) else {
@@ -468,6 +527,10 @@ final class Notebook: ObservableObject {
             }
             let current = try String(contentsOf: url, encoding: .utf8)
             if current != diskText {
+                if automatically {
+                    refreshFromDisk(reload: false)
+                    return false
+                }
                 let alert = NSAlert()
                 alert.messageText = "This note changed outside Omega"
                 alert.informativeText = "Keep both versions by saving your edits as a new file, or reload the version on disk."
@@ -482,7 +545,7 @@ final class Notebook: ObservableObject {
                     try DraftRecovery.write(text, to: copy)
                     recovery.clear(url)
                     observeHistory(current, at: url)
-                    text = current; diskText = current; dirty = false; revision = UUID(); status = "Reloaded from disk"; reloadTree(); return true
+                    text = current; diskText = current; dirty = false; externalConflict = false; updateActivity = nil; revision = UUID(); status = "Reloaded from disk"; reloadTree(); return true
                 default: status = "Unsaved changes"; return false
                 }
             }
@@ -825,34 +888,63 @@ final class Notebook: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "lastNote")
     }
 
-    func refreshFromDisk() {
-        guard !checking, !dirty, !gitSyncing else { return }
-        checking = true; defer { checking = false }
-        reloadTree()
+    func refreshFromDisk(reload: Bool = true) {
+        guard !checking, !loading, !gitSyncing else { return }
+        if reload { reloadTree() }
         guard let selected else { return }
         if let current = try? String(contentsOf: selected, encoding: .utf8), current != diskText {
-            if let editor = richEditor, LiveCollaboration.shared.isSharing(editor) {
-                // Import an external/assistant edit as a granular shared transaction.
-                // Recheck identity and disk contents when the web view replies.
-                let expected = text
-                editor.replaceForAssistant(expected: expected, text: current) { [weak self] result in
-                    guard let self, self.selected == selected, (try? String(contentsOf: selected, encoding: .utf8)) == current else { return }
-                    if case .success = result { self.diskText = current; self.dirty = self.text != current; if !self.dirty { self.recovery.clear(selected) } }
+            saveTask?.cancel()
+            if let editor = richEditor {
+                checking = true
+                if !externalConflict { showUpdate("Receiving changes…", at: selected, pending: true) }
+                editor.applyExternal(base: diskText, text: current) { [weak self] result in
+                    guard let self else { return }
+                    self.checking = false
+                    guard self.selected == selected else { return }
+                    switch result["status"] as? String {
+                    case "applied":
+                        guard let value = result["text"] as? String else { return }
+                        // The accepted disk version is the merge baseline even if
+                        // another atomic write has already arrived behind it.
+                        self.diskText = current; self.externalConflict = false
+                        self.edit(value); self.dirty = self.text != current
+                        do {
+                            if self.dirty { try self.recovery.checkpoint(self.text, original: current, file: selected) }
+                            else { self.recovery.clear(selected) }
+                        } catch { self.showError(error) }
+                        self.showUpdate("Updated externally", at: selected)
+                        self.status = self.dirty ? "Saving merged changes…" : "All changes saved"
+                        if (try? String(contentsOf: selected, encoding: .utf8)) != current { self.refreshFromDisk(reload: false) }
+                        else if self.dirty { _ = self.save(automatically: true) }
+                    case "conflict":
+                        self.externalConflict = true
+                        self.showUpdate("Outside edits need review", at: selected, pending: true)
+                        self.status = "Both versions are safe · review outside edits"
+                    default:
+                        self.showUpdate("Update waiting for this edit", at: selected, pending: true)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                            if self?.selected == selected { self?.refreshFromDisk(reload: false) }
+                        }
+                    }
                 }
                 return
             }
+            guard !dirty else { showUpdate("Outside edits need review", at: selected, pending: true); return }
             observeHistory(current, at: selected)
             text = current; diskText = current; revision = UUID(); status = "Updated from disk"
+            showUpdate("Updated externally", at: selected)
         } else if !FileManager.default.fileExists(atPath: selected.path) {
             status = "File moved or deleted — edit to save a copy"
         }
     }
 
+    func reviewOutsideEdits() { afterSync { _ = self.save() } }
+
 
     // Assistant requests run on the main actor, after the editor has synchronized.
     // Never show a modal conflict dialog or replace a divergent on-disk version.
     func prepareAssistantAccess() throws {
-        guard !gitSyncing else { throw AssistantError("This notebook is syncing with Git. Retry shortly.") }
+        guard !gitSyncing, !checking else { throw AssistantError("This notebook is receiving outside changes. Retry shortly.") }
         guard !loading else { throw AssistantError("Omega is opening a notebook. Retry shortly.") }
         if dirty, let selected {
             guard (try? String(contentsOf: selected, encoding: .utf8)) == diskText else {

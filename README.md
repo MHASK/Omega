@@ -49,6 +49,10 @@ claude mcp add --transport stdio --scope user folio -- /Applications/Omega.app/C
 
 Restart/reconnect the client after updating Omega. The service supports notes, folders, task pages, nested tasks, goals and goal links. Access is limited to open notebooks; writes use revision checks and saved history. Both you and an assistant can edit, with conflicting writes rejected instead of silently overwriting your work. No notes are sent to GitHub by the updater. A connected assistant handles note content according to that client's settings.
 
+Open notes update as writes arrive. MCP clients identify themselves during connection, so Omega can show “Updated by Claude” or “Updated by Codex” beside the document controls. Changed passages briefly highlight without moving your selection. Direct filesystem edits are labeled “Updated externally” because a file write does not reliably identify its author. This is edit activity, not a simulated assistant cursor: MCP does not send a continuous caret position.
+
+Omega watches the open file, including atomic file replacements, and keeps a periodic fallback check. Independent outside edits merge with unsaved typing; overlapping edits retain the local recovery copy and the outside file, with a review indicator instead of an automatic interruption. Updates wait while an editing dialog or text composition is active.
+
 ## Git notebooks
 
 Open **Settings → Git sync**. Choose GitHub or GitLab, then **Open Git folder** for an existing repository or enter its HTTPS URL and choose **Clone repository**. The repository becomes a normal notebook in the sidebar. Repositories must have an `origin` HTTPS remote; use the repository's top folder. Nested GitLab groups and self-hosted hosts are supported by the selected CLI's existing host login.
