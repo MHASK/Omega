@@ -10,13 +10,13 @@ import {createRelay,verifyAccess,scope} from './server.mjs';
 const encode=doc=>Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64');
 const apply=(doc,data)=>Y.applyUpdate(doc,Buffer.from(data,'base64'));
 const seed=()=>{const d=new Y.Doc({gc:false});d.getMap('meta').set('version',1);d.getMap('meta').set('lineage',crypto.randomUUID());d.getMap('meta').set('kind','source');d.getText('source').insert(0,'Hello world');return d;};
-async function start(dir){const r=createRelay({directory:dir,verify:async m=>{scope(m);if(!['test-token','bob-token','cara-token'].includes(m.token))throw Error();return {key:m.path==='other.md'?'other':'test',name:m.token==='bob-token'?'Bob':m.token==='cara-token'?'Cara':'Alice'};}});await new Promise(done=>r.server.listen(0,'127.0.0.1',done));return r;}
+async function start(dir){const r=createRelay({directory:dir,verify:async m=>{scope(m);if(!['test-token','bob-token','cara-token'].includes(m.token))throw Error();return {key:JSON.stringify([m.provider,m.project,m.branch,m.path]),notebook:JSON.stringify([m.provider,m.project,m.branch]),name:m.token==='bob-token'?'Bob':m.token==='cara-token'?'Cara':'Alice'};}});await new Promise(done=>r.server.listen(0,'127.0.0.1',done));return r;}
 async function client(relay,doc,extra={}){
- const ws=new WebSocket('ws://127.0.0.1:'+relay.server.address().port+'/live');const queue=[],waiters=[];
- ws.on('message',data=>{const m=JSON.parse(data);if(m.type==='peers')return;const next=waiters.shift();next?next(m):queue.push(m);});
+ const ws=new WebSocket('ws://127.0.0.1:'+relay.server.address().port+'/live');const queue=[],waiters=[],presence=[];
+ ws.on('message',data=>{const m=JSON.parse(data);if(m.type==='notebookPresence'){presence.push(m);return;}if(m.type==='peers')return;const next=waiters.shift();next?next(m):queue.push(m);});
  const next=()=>queue.length?Promise.resolve(queue.shift()):new Promise(resolve=>waiters.push(resolve));
  await new Promise(resolve=>ws.on('open',resolve));ws.send(JSON.stringify({type:'join',protocol:1,provider:'github',project:'owner/notes',branch:'main',path:'note.md',token:'test-token',seed:encode(doc),...extra}));
- return {ws,next,send:update=>ws.send(JSON.stringify({type:'update',update:encode(update),sequence:1,lineage:update.getMap('meta').get('lineage')}))};
+ return {ws,next,presence,send:update=>ws.send(JSON.stringify({type:'update',update:encode(update),sequence:1,lineage:update.getMap('meta').get('lineage')}))};
 }
 test('provider write permission, allowlist, fixed origins, no redirects and traversal',async()=>{
  const message={provider:'github',project:'owner/notes',branch:'main',path:'a.md',token:'secret'};
@@ -81,4 +81,26 @@ test('three live cursors, verified names, late join, room isolation, anti-spoofi
   send(c,aa);assert.equal((await c.next()).type,'error');const removal=await b.next();applyAwarenessUpdate(ab,Buffer.from(removal.update,'base64'),'relay');assert.ok(!ab.getStates().has(ac.clientID));
   a.ws.close();await new Promise(resolve=>a.ws.once('close',resolve));const left=await b.next();applyAwarenessUpdate(ab,Buffer.from(left.update,'base64'),'relay');assert.ok(!ab.getStates().has(aa.clientID),'cursor removed on disconnect');
  }finally{for(const ws of sockets)ws.terminate();for(const aw of awareness)aw.destroy();for(const d of docs)d.destroy();await relay.close();}
+});
+
+
+test('sidebar file activity is live, authenticated, branch scoped and cleared on departure',async()=>{
+ const relay=await start(),sockets=[];
+ const until=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10));}assert.fail('Presence did not arrive');};
+ try{
+  const a=await client(relay,seed());sockets.push(a.ws);await a.next();
+  const b=await client(relay,seed(),{token:'bob-token',path:'other.md'});sockets.push(b.ws);await b.next();
+  await until(()=>a.presence.at(-1)?.files.length===2);
+  assert.equal(a.presence.at(-1).self,'Alice');
+  assert.deepEqual(a.presence.at(-1).files.find(f=>f.path==='other.md').users,['Bob']);
+  const c=await client(relay,seed(),{token:'cara-token',branch:'private-branch',path:'private.md'});sockets.push(c.ws);await c.next();
+  await until(()=>c.presence.length>0);
+  assert.deepEqual(c.presence.at(-1).files.map(f=>f.path),['private.md']);
+  assert.ok(a.presence.every(p=>p.files.every(f=>f.path!=='private.md')));
+  const otherRepo=await client(relay,seed(),{project:'other/notes',path:'secret.md'});sockets.push(otherRepo.ws);await otherRepo.next();
+  await until(()=>otherRepo.presence.length>0);assert.deepEqual(otherRepo.presence.at(-1).files.map(f=>f.path),['secret.md']);
+  const bad=await client(relay,seed(),{token:'wrong'});sockets.push(bad.ws);assert.equal((await bad.next()).type,'error');assert.equal(bad.presence.length,0);
+  b.ws.close();await until(()=>a.presence.at(-1)?.files.length===1);
+  assert.equal(a.presence.at(-1).files[0].path,'note.md');
+ }finally{for(const ws of sockets)ws.terminate();await relay.close();}
 });

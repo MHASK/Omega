@@ -22,7 +22,7 @@ let slashRange = null, dismissedSlash = null, entryCallback, lastScale = 1, toas
 const scroller = $('scroller'), bubble = $('bubble'), slash = $('slash'), tableTools = $('table-tools'), source = $('source');
 let beforeSelection = '', typingEdit = false;
 let edgeTable = null, pageRequest = null, dismissedPage = null, pageSequence = 0;
-const writing=new WritingTools({editor:()=>editor,hideMenus:()=>{hideMenus();blocks.close();},preferences:values=>send('writingPreferences',{id:identity,...values})});
+const writing=new WritingTools({editor:()=>editor,hideMenus:()=>{hideMenus();blocks.close();},preferences:values=>send('writingPreferences',{id:identity,...values}),state:values=>send('writingState',{id:identity,...values})});
 const blocks=new BlockTools({refresh:()=>requestAnimationFrame(updateMenus),disabled:()=>sourceMode||taskMode||undoHistory.busy||writing.busy,hideMenus:()=>{hideMenus();writing.close();},turnInto:kind=>turnInto(kind),color:range=>writing.openColors(range),comment:range=>writing.startComment(range)});
 function turnInto(kind){const command=commandList.find(c=>c[0]===(kind==='paragraph'?'text':kind));if(command?.[3])command[3](editor.chain().focus()).run();}
 const rowAdd = $('table-add-row'), columnAdd = $('table-add-column');
@@ -425,7 +425,9 @@ window.folio={
     const text=value();if(sourceMode&&needsSource(text)&&!parseTasks(text)){$('toast').textContent='Extended Markdown · source view';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,2200);return;}
     const wasSource=sourceMode;this.load({id:identity,text,source:!wasSource,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});this.focus();return;
   }
-  if(name==='appearance'&&!taskMode){writing.openAppearance();return;}
+  if(name==='closeWriting'){writing.close();return;}
+  if(name==='appearance'&&!taskMode){writing.mode==='appearance'?writing.close():writing.openAppearance();return;}
+  if(name==='comments'&&!taskMode&&!sourceMode){writing.mode==='comments'?writing.close():writing.openComments();return;}
   if(taskMode||readOnly)return;
   if(sourceMode){
    const marks={bold:['**','**'],italic:['*','*'],strike:['~~','~~'],underline:['<u>','</u>'],code:['`','`'],heading:['## ',''],task:['- [ ] ','']};

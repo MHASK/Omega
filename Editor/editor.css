@@ -259,27 +259,27 @@ input:is([type=checkbox],[type=radio]):disabled{cursor:default;opacity:.55}
 .note-tools button{display:flex;align-items:center;justify-content:center;gap:5px;height:27px;min-width:28px;padding:3px 6px;color:var(--muted);font-size:12px;border-radius:4px}
 .note-tools button:hover{color:var(--text);background:var(--hover)}.note-tools button[data-count]::after{content:attr(data-count);font-size:9px}.note-tools button[data-count='']::after{display:none}
 .bubble .color-icon{font-family:Georgia,serif;font-weight:600;border-bottom:2px solid var(--writing-accent);line-height:1.1}.bubble button.active{color:var(--text)}
-.writing-panel{z-index:22;width:min(264px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;padding:10px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text);font-size:11px}
+.writing-panel{z-index:22;width:min(238px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;padding:10px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text);font-size:11px}
 .writing-panel-heading{display:flex;align-items:center;justify-content:space-between;padding:2px 3px 11px;font-size:11px;font-weight:600}.writing-panel-heading button{color:var(--muted);font-weight:400;font-size:17px;line-height:1}
 .writing-panel button{border-radius:4px}.writing-panel button:hover{background:var(--hover)}
 .writing-fonts{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-.writing-fonts button{display:grid;place-items:center;gap:6px;padding:10px 5px;border:1px solid transparent}.writing-fonts button.active{background:var(--hover);border-color:var(--line)}.font-sample{font-size:22px;line-height:1.2}.writing-fonts small{font:10px -apple-system,BlinkMacSystemFont,sans-serif;color:var(--muted)}
+.writing-fonts button{display:grid;place-items:center;gap:5px;padding:8px 5px;border:1px solid transparent}.writing-fonts button.active{background:var(--hover);border-color:var(--line)}.font-sample{font-size:20px;line-height:1.2}.writing-fonts small{font:10px -apple-system,BlinkMacSystemFont,sans-serif;color:var(--muted)}
 .writing-fonts [data-font=serif]{font-family:Charter,Georgia,serif}.writing-fonts [data-font=mono]{font-family:ui-monospace,Menlo,monospace}
 .writing-option{display:flex;justify-content:space-between;align-items:center;gap:14px;min-height:39px;padding:6px 3px}.writing-stepper{display:flex;align-items:center;gap:2px;color:var(--muted)}.writing-stepper button{min-width:24px;height:25px;padding:3px 5px}.writing-stepper button:nth-child(2){font-size:10px;min-width:42px;font-variant-numeric:tabular-nums}
 .writing-hint{font-size:9px;color:var(--muted);margin:7px 3px 2px;line-height:1.6}
-.writing-section-label{font-size:10px;color:var(--muted);padding:5px 3px 8px}.color-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:0 2px 10px}
-.color-swatch{--ink:var(--ink-light);height:32px;border:1px solid var(--line);color:var(--ink);font:600 15px Georgia,serif;border-radius:5px!important}
+.writing-section-label{font-size:10px;color:var(--muted);padding:5px 3px 8px}.color-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px 2px 6px}
+.color-swatch{--ink:var(--ink-light);height:28px;border:1px solid var(--line);color:var(--ink);font:600 15px Georgia,serif;border-radius:5px!important}
 :root[data-theme=dark] .color-swatch{--ink:var(--ink-dark)}
 .color-swatch.color-background{color:var(--text);background:color-mix(in srgb,var(--ink) 20%,var(--paper))}.color-swatch.default-color{color:var(--text);background:linear-gradient(135deg,transparent 48%,var(--line) 49%,var(--line) 51%,transparent 52%)}
 .color-swatch[aria-pressed=true]{outline:1px solid currentColor;outline-offset:1px}
 .tiptap [data-omega-color]{color:var(--writing-ink)}.tiptap mark[data-omega-highlight]{background:color-mix(in srgb,var(--writing-ink) 22%,transparent);color:inherit;border-radius:3px;padding:.08em .06em;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .tiptap [data-omega-comment]{text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--writing-accent) 75%,transparent);text-underline-offset:4px;cursor:pointer}.tiptap [data-omega-comment]:hover{background:color-mix(in srgb,var(--writing-accent) 13%,transparent)}
 .tiptap [data-omega-person]{background:var(--hover);border-radius:3px;padding:1px 4px;white-space:break-spaces;color:var(--text)}
-.writing-comments,.writing-compose{width:min(304px,calc(100vw - 16px))}.comment-filter{display:flex;align-items:center;gap:7px;color:var(--muted);border-bottom:1px solid var(--line);padding:0 2px 9px}.comment-filter button{font-size:10px;padding:3px 4px}.comment-filter small{font-size:9px}.comment-list{max-height:min(460px,65vh);overflow:auto}.comment-empty{padding:15px 5px 17px;line-height:1.7;color:var(--muted);margin:0}
-.comment-thread{padding:13px 3px;border-bottom:1px solid var(--line)}.comment-thread:last-child{border-bottom:0;padding-bottom:4px}.comment-thread.active{border-left:2px solid var(--writing-accent);padding-left:8px}
-.comment-quote{display:block;text-align:left;width:100%;font-size:10px;line-height:1.6;color:var(--muted);border:0;border-left:2px solid var(--line);padding:2px 8px!important;margin:0 0 12px;max-height:58px;overflow:hidden;overflow-wrap:anywhere}
-.comment-byline{display:flex;justify-content:space-between;gap:8px;font-size:10px}.comment-byline strong{font-weight:550}.comment-byline time{color:var(--muted);font-size:9px}.comment-message p{margin:5px 0 13px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:11px;user-select:text}
-.comment-input{display:block;resize:vertical;min-height:64px;max-height:180px;width:100%;border:1px solid var(--line);border-radius:5px;background:var(--paper);padding:8px;color:var(--text);outline:none;font-size:11px;line-height:1.7}.comment-input:focus{border-color:var(--muted)}.comment-input::placeholder{color:var(--muted)}
+.writing-comments,.writing-compose{width:min(286px,calc(100vw - 16px))}.comment-filter{display:flex;align-items:center;gap:7px;color:var(--muted);border-bottom:1px solid var(--line);padding:0 2px 9px}.comment-filter button{font-size:10px;padding:3px 4px}.comment-filter small{font-size:9px}.comment-list{max-height:min(460px,65vh);overflow:auto}.comment-empty{padding:15px 5px 17px;line-height:1.7;color:var(--muted);margin:0}
+.comment-thread{padding:13px 3px;border-bottom:1px solid var(--line)}.comment-thread:last-child{border-bottom:0;padding-bottom:4px}.comment-thread.active .comment-quote{border-left-color:var(--writing-accent)}
+.comment-quote{display:block;text-align:left;width:100%;font-size:10px;line-height:1.6;color:var(--muted);border:0;border-left:2px solid var(--line);padding:2px 8px!important;margin:0 0 10px;max-height:38px;overflow:hidden;overflow-wrap:anywhere}
+.comment-byline{display:flex;align-items:center;gap:6px;font-size:10px}.comment-byline strong{font-weight:550}.comment-byline time{color:var(--muted);font-size:9px;margin-left:auto;white-space:nowrap}.comment-byline strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.comment-message p{margin:5px 0 10px 24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:11px;user-select:text}
+.comment-input{display:block;resize:vertical;min-height:56px;max-height:150px;width:100%;border:1px solid var(--line);border-radius:5px;background:var(--paper);padding:8px;color:var(--text);outline:none;font-size:11px;line-height:1.7}.comment-input:focus{border-color:var(--muted)}.comment-input::placeholder{color:var(--muted)}
 .comment-actions{display:flex;justify-content:flex-end;align-items:center;gap:9px;margin-top:9px}.comment-actions small{margin-right:auto;color:var(--muted);font-size:9px}.comment-actions button,.comment-thread>button:last-child{padding:5px 7px;font-size:10px;color:var(--muted)}.comment-actions button:last-child{color:var(--text)}
 .block-tools{position:fixed;z-index:9;display:flex;align-items:center;gap:1px;color:var(--muted);background:var(--paper);border-radius:4px}.block-tools button{width:18px;height:24px;padding:0;font-size:17px;border-radius:3px}.block-tools button:last-child{font-size:19px;cursor:grab}.block-tools button:last-child:active{cursor:grabbing}.block-tools button:hover{background:var(--hover);color:var(--text)}
 .block-menu{width:min(188px,calc(100vw - 16px));padding:5px;z-index:21}.block-menu button,.block-menu select{display:block;width:100%;font-size:11px;text-align:left;padding:7px 8px;border:0;border-radius:4px;background:none}.block-menu select{color:var(--muted);margin-bottom:5px}.block-menu button:hover{background:var(--hover)}.block-menu small{display:block;border-top:1px solid var(--line);padding:10px 7px 5px;margin-top:5px;color:var(--muted);font-size:9px}.block-drop-guide{position:fixed;z-index:25;height:2px;background:var(--writing-accent);pointer-events:none}
@@ -302,3 +302,16 @@ input:is([type=checkbox],[type=radio]):disabled{cursor:default;opacity:.55}
 :root[data-theme=dark] .tiptap :is([data-omega-color=pink],[data-omega-highlight=pink]){--writing-ink:#d9a6bc}
 :root[data-theme=light] .tiptap :is([data-omega-color=red],[data-omega-highlight=red]){--writing-ink:#af5956}
 :root[data-theme=dark] .tiptap :is([data-omega-color=red],[data-omega-highlight=red]){--writing-ink:#dfa4a0}
+
+/* Window controls sit in the native title row; panels open immediately below it. */
+:root[data-native-header=true] #editor{padding-top:14px}
+:root[data-native-header=true] :is(#source,#source-highlight){padding-top:14px}
+.writing-tabs{display:flex;gap:3px;padding:3px;background:var(--hover);border-radius:5px}
+.writing-tabs button{flex:1;min-height:25px;font-size:10px;color:var(--muted)}
+.writing-tabs button:is([aria-selected=true],[aria-pressed=true]){background:var(--paper);color:var(--text);box-shadow:0 1px 2px #0000000a}
+.color-caption{min-height:22px;padding:5px 2px 0;color:var(--muted);font-size:9px;text-align:center}
+.comment-filter.writing-tabs{border:0;padding:3px;gap:3px}
+.comment-empty{display:flex;align-items:center;flex-direction:column;text-align:center;padding:23px 14px 20px;gap:7px}
+.comment-empty .icon{font-size:15px;opacity:.65;margin-bottom:3px}.comment-empty strong{font-size:11px;font-weight:500;color:var(--text)}.comment-empty p{font-size:10px;line-height:1.6;margin:0;max-width:200px}
+.comment-avatar{display:grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--hover);font-size:8px;color:var(--muted)}
+.comment-actions button:last-child:not(:disabled){background:var(--hover)}

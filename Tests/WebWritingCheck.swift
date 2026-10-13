@@ -76,7 +76,7 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
             try check(try await text(0)==note,"document appearance never rewrites the local note")
             try await screenshot("writing-appearance");try await click(0,".writing-panel [aria-label=Close]")
             try await select(0,"Good ideas");_ = try await js(0,"window.folio.command('color');true");try await settle();try await screenshot("writing-colors")
-            try await click(0,"[aria-label='Blue text']");_ = try await js(0,"window.folio.command('color');true");try await click(0,"[aria-label='Yellow highlight']")
+            try await click(0,"[aria-label='Blue text']");_ = try await js(0,"window.folio.command('color');true");try await click(0,"[aria-label='Highlight colors']");try await click(0,"[aria-label='Yellow highlight']")
             _ = try await js(0,"window.folio.command('underline');true");try await settle()
             let colored=try await text(0);try check(colored.contains("data-omega-color=\"blue\"") && colored.contains("data-omega-highlight=\"yellow\""),"selection color/highlight/underline commit through the actual toolbar")
             _ = try await js(0,"window.folio.command('comment');true");try await settle()
@@ -92,7 +92,7 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
             try check(try await js(0,"document.querySelector('.note-tools button[data-count]').dataset.count") as! String == "1","comment survives reload")
             try await join(0);try await join(1)
             sharing=false
-            try await select(0,"next chapter");_ = try await js(0,"window.folio.command('color');true");try await click(0,"[aria-label='Green text']")
+            try await select(0,"next chapter");_ = try await js(0,"window.folio.command('color');true");try await click(0,"[aria-label='Text colors']");try await click(0,"[aria-label='Green text']")
             try await select(1,"new paragraph");_ = try await js(1,"window.folio.command('comment');true");try await settle()
             _ = try await js(1,"(()=>{const t=document.querySelector('.comment-input');t.value='From the second editor.';t.dispatchEvent(new Event('input'));document.querySelector('button[aria-label=\"Add comment\"]').click();return true})()");try await settle();try await click(1,".writing-panel [aria-label=Close]")
             let a=checkpoints[0]!,b=checkpoints[1]!;sharing=true;deliver(0,["type":"update","update":b["state"]!]);deliver(1,["type":"update","update":a["state"]!]);try await settle()
@@ -113,6 +113,12 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
             // Responsive controls and source-mode appearance use the same preference.
             views[0].setFrameSize(NSSize(width:360,height:640));try await load(0,note);try await click(0,".note-tools button:last-child");try await screenshot("writing-narrow")
             try check(try await js(0,"(()=>{const r=document.querySelector('.writing-panel').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth})()") as! Bool,"appearance panel stays inside a narrow window")
+            _ = try await js(0,"window.folio.configure({nativeHeader:true});window.folio.command('closeWriting');window.folio.command('comments');true");try await settle()
+            try check(try await js(0,"document.querySelector('.note-tools').hidden") as! Bool,"native header replaces floating document controls")
+            try check(try await js(0,"(()=>{const r=document.querySelector('.writing-panel').getBoundingClientRect();return r.top<=9&&Math.abs(r.right-innerWidth+8)<2})()") as! Bool,"native comments open against the top-right edge")
+            try await screenshot("writing-native-comments")
+            _ = try await js(0,"window.folio.command('closeWriting');window.folio.command('appearance');true");try await settle()
+            try await screenshot("writing-native-appearance")
             print("PASS: real WebKit writing controls, independent typography, styled Markdown, durable comments, concurrent collaboration, undo and narrow layout")
         } catch {failed=true;print("FAIL:",error)}
         for view in views {view.evaluateJavaScript("window.folio.liveStop()",completionHandler:nil)}

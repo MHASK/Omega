@@ -23,16 +23,20 @@ export class WritingTools {
    if(transaction.docChanged){this.updateCount();if(this.mode==='comments'&&!this.composing)this.renderComments();}
   });this.updateCount();}
  configure(config,{taskMode,sourceMode}){
+  if(config.nativeHeader!==undefined)this.nativeHeader=!!config.nativeHeader;
+  this.sourceMode=sourceMode;this.taskMode=taskMode;
   this.author=config.author||this.author;
   if(config.writingScale!==undefined)this.preferences.scale=Math.max(.8,Math.min(1.8,config.writingScale));
   if(['default','serif','mono'].includes(config.writingFont))this.preferences.font=config.writingFont;
   if(config.writingWide!==undefined)this.preferences.wide=!!config.writingWide;
   const root=document.documentElement;root.style.setProperty('--writing-scale',this.preferences.scale);root.dataset.writingFont=this.preferences.font;root.dataset.writingWide=String(this.preferences.wide);
-  this.tools.hidden=taskMode;this.commentsButton.hidden=sourceMode;
+  root.dataset.nativeHeader=String(!!this.nativeHeader);
+  this.tools.hidden=taskMode||this.nativeHeader;this.commentsButton.hidden=sourceMode;this.updateCount();
   if(this.mode==='appearance')this.renderAppearance();
  }
  changePreferences(values){this.preferences={...this.preferences,...values};this.configure({writingScale:this.preferences.scale,writingFont:this.preferences.font,writingWide:this.preferences.wide},{taskMode:false,sourceMode:!this.editor});this.host.preferences(values);}
- open(mode,title,rect){this.close();this.host.hideMenus();this.mode=mode;this.panel.className='popover writing-panel writing-'+mode;this.panel.setAttribute('aria-label',title);this.panel.replaceChildren();this.anchor=rect||this.styleButton.getBoundingClientRect();}
+ headerAnchor(button){return this.nativeHeader?{left:innerWidth,bottom:0}:button.getBoundingClientRect();}
+ open(mode,title,rect){this.close();this.host.hideMenus();this.mode=mode;this.panel.className='popover writing-panel writing-'+mode;this.panel.setAttribute('aria-label',title);this.panel.replaceChildren();this.anchor=rect||this.headerAnchor(this.styleButton);}
  heading(title){const row=make('div','writing-panel-heading');row.append(make('span','',title),quietButton('Close',()=>this.close(),'×'));this.panel.append(row);}
  openAppearance(){this.open('appearance','Document appearance');this.renderAppearance();}
  renderAppearance(){
@@ -46,16 +50,23 @@ export class WritingTools {
   const editor=this.host.editor();if(!editor?.isEditable)return;
   const saved=range||{from:editor.state.selection.from,to:editor.state.selection.to};
   const rect=editor.view.coordsAtPos(saved.from);this.open('colors','Text color and highlight',rect);this.range=saved;
-  this.heading('Color');
+  this.colorTab=this.colorTab||'textColor';this.renderColors();
+ }
+ renderColors(){
+  const editor=this.host.editor();this.panel.replaceChildren();
+  const tabs=make('div','writing-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Color type');
+  for(const [value,label] of [['textColor','Text'],['highlight','Highlight']]){const b=quietButton(label+' colors',()=>{this.colorTab=value;this.renderColors();},label);b.setAttribute('role','tab');b.setAttribute('aria-selected',String(this.colorTab===value));tabs.append(b);}this.panel.append(tabs);
   for(const [mark,title] of [['textColor','Text'],['highlight','Highlight']]){
-   this.panel.append(make('div','writing-section-label',title));const grid=make('div','color-grid');
+   if(mark!==this.colorTab)continue;const grid=make('div','color-grid');grid.setAttribute('role','tabpanel');grid.setAttribute('aria-label',title+' colors');
    const clear=quietButton('Default '+title.toLowerCase(),()=>this.applyColor(mark,null),'A');clear.className='color-swatch default-color';grid.append(clear);
    for(const [name,label,light,dark] of writingColors){const b=quietButton(label+' '+title.toLowerCase(),()=>this.applyColor(mark,name),'A');b.className='color-swatch '+(mark==='highlight'?'color-background':'');b.style.setProperty('--ink-light',light);b.style.setProperty('--ink-dark',dark);b.dataset.color=name;b.setAttribute('aria-pressed',String(editor.isActive(mark,{value:name})));grid.append(b);}this.panel.append(grid);
   }
-  positionPopover(this.panel,rect);
+  const hint=make('div','color-caption','Choose a '+(this.colorTab==='highlight'?'highlight':'text color'));this.panel.append(hint);
+  for(const swatch of this.panel.querySelectorAll('.color-swatch')){const label=swatch.title;swatch.onpointerenter=()=>hint.textContent=label;swatch.onfocus=()=>hint.textContent=label;}
+  positionPopover(this.panel,this.anchor);
  }
  applyColor(mark,color){const editor=this.host.editor(),range=this.range;if(!range||!editor?.isEditable)return;const chain=editor.chain().focus().setTextSelection(range);color?chain.setMark(mark,{value:color}).run():chain.unsetMark(mark).run();this.close();}
- updateCount(){if(!this.editor||this.editor.isDestroyed)return;const count=commentRecords(this.editor.state.doc).filter(x=>x.record.id===x.record.thread&&!x.record.resolved).length;this.commentsButton.dataset.count=count||'';this.commentsButton.setAttribute('aria-label',count?`${count} open comments`:'Comments');}
+ updateCount(){const count=this.editor&&!this.editor.isDestroyed&&!this.sourceMode&&!this.taskMode?commentRecords(this.editor.state.doc).filter(x=>x.record.id===x.record.thread&&!x.record.resolved).length:0;this.commentsButton.dataset.count=count||'';this.commentsButton.setAttribute('aria-label',count?`${count} open comments`:'Comments');this.host.state?.({comments:count,source:!!this.sourceMode});}
  startComment(range){
   const editor=this.host.editor();if(!editor?.isEditable)return;
   const selection=range||editor.state.selection,from=selection.from,to=selection.to;
@@ -67,18 +78,18 @@ export class WritingTools {
   const actions=make('div','comment-actions');const save=quietButton('Add comment',()=>{if(!input.value.trim())return;const id=addComment(editor,{range:this.range,body:input.value,author:this.author});if(id)this.openComments(id);},'Add comment');save.disabled=true;input.oninput=()=>{save.disabled=!input.value.trim();};input.onkeydown=e=>{if(e.metaKey&&e.key==='Enter'){e.preventDefault();save.click();}};
   actions.append(make('small','','⌘↵ to add'),save);this.panel.append(input,actions);positionPopover(this.panel,rect);input.focus();
  }
- openComments(thread){this.open('comments','Comments',this.commentsButton.getBoundingClientRect());this.thread=thread;this.resolved=!!(thread&&commentRecords(this.host.editor()?.state.doc).find(x=>x.record.id===thread)?.record.resolved);this.renderComments();}
+ openComments(thread){this.open('comments','Comments',this.headerAnchor(this.commentsButton));this.thread=thread;this.resolved=!!(thread&&commentRecords(this.host.editor()?.state.doc).find(x=>x.record.id===thread)?.record.resolved);this.renderComments();}
  renderComments(){
   const editor=this.host.editor();if(!editor)return;this.panel.replaceChildren();this.heading('Comments');
   const all=commentRecords(editor.state.doc),roots=all.filter(x=>x.record.id===x.record.thread&&x.record.resolved===this.resolved);
-  const bar=make('div','comment-filter');const toggle=quietButton(this.resolved?'Show open comments':'Show resolved comments',()=>{this.resolved=!this.resolved;this.thread=null;this.renderComments();},this.resolved?'Resolved':'Open');bar.append(toggle,make('small','',String(roots.length)));this.panel.append(bar);
+  const bar=make('div','comment-filter writing-tabs');for(const resolved of [false,true]){const count=all.filter(x=>x.record.id===x.record.thread&&x.record.resolved===resolved).length;const toggle=quietButton(resolved?'Show resolved comments':'Show open comments',()=>{this.resolved=resolved;this.thread=null;this.renderComments();},(resolved?'Resolved':'Open')+' '+count);toggle.setAttribute('aria-pressed',String(this.resolved===resolved));bar.append(toggle);}this.panel.append(bar);
   const list=make('div','comment-list');
-  if(!roots.length)list.append(make('p','comment-empty',this.resolved?'No resolved comments.':'A little room for a conversation. Select text, then choose Comment.'));
+  if(!roots.length){const empty=make('div','comment-empty');empty.append(make('span','icon','\uf075'),make('strong','',this.resolved?'Nothing resolved yet':'Start a conversation'),make('p','',this.resolved?'Resolved threads will appear here.':'Select a passage and choose Comment.'));list.append(empty);}
   for(const {record} of roots){
    const card=make('section','comment-thread');card.dataset.thread=record.id;if(record.id===this.thread)card.classList.add('active');
    const quote=quietButton('Go to commented text',()=>{const range=commentRange(editor.state.doc,record.id);if(range)editor.chain().focus().setTextSelection(range).scrollIntoView().run();},record.quote||'Comment');quote.className='comment-quote';card.append(quote);
    for(const {record:reply} of all.filter(x=>x.record.thread===record.id)){
-    const message=make('div','comment-message');const info=make('div','comment-byline');info.append(make('strong','',reply.author),make('time','',new Date(reply.created).toLocaleDateString(undefined,{month:'short',day:'numeric'})));message.append(info,make('p','',reply.body));card.append(message);
+    const message=make('div','comment-message');const info=make('div','comment-byline');const avatar=make('span','comment-avatar',reply.author.trim().split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase());avatar.setAttribute('aria-hidden','true');info.append(avatar,make('strong','',reply.author),make('time','',new Date(reply.created).toLocaleDateString(undefined,{month:'short',day:'numeric'})));message.append(info,make('p','',reply.body));card.append(message);
    }
    const controls=make('div','comment-actions');const reply=quietButton('Reply',()=>this.reply(card,record.id),'Reply');const resolve=quietButton(record.resolved?'Reopen comment':'Resolve comment',()=>{resolveComment(editor,record.id,!record.resolved);this.renderComments();},record.resolved?'Reopen':'Resolve');reply.disabled=resolve.disabled=!editor.isEditable;controls.append(reply,resolve);card.append(controls);list.append(card);
   }

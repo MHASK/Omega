@@ -59,7 +59,7 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let labelConfig = String(decoding: (try? JSONSerialization.data(withJSONObject: notebook.labelColors, options: [.sortedKeys])) ?? Data(), as: UTF8.self)
         let settings = "\(theme)|\(notebook.zoom)|\(notebook.reading)|\(accent)|\(labelConfig)|\(notebook.writingScale)|\(notebook.writingFont)|\(notebook.writingWide)"
         if loadedID == identity && settings == lastConfiguration { revealPending(); revealItemPending(); return }
-        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors, "writingScale": notebook.writingScale, "writingFont": notebook.writingFont, "writingWide": notebook.writingWide, "author": NSFullUserName()]
+        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors, "writingScale": notebook.writingScale, "writingFont": notebook.writingFont, "writingWide": notebook.writingWide, "author": NSFullUserName(), "nativeHeader": true]
         guard let data = try? JSONSerialization.data(withJSONObject: config), let json = String(data: data, encoding: .utf8) else { return }
         if loadedID != identity {
             LiveCollaboration.shared.stop()
@@ -163,6 +163,10 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         case "writingPreferences":
             guard body["id"] as? String == identity else { return }
             notebook.setWriting(scale: body["scale"] as? Double, font: body["font"] as? String, wide: body["wide"] as? Bool)
+        case "writingState":
+            guard body["id"] as? String == identity else { return }
+            notebook.documentComments = body["comments"] as? Int ?? 0
+            notebook.documentIsSource = body["source"] as? Bool ?? false
         case "writingZoom": notebook.changeWritingSize(body["direction"] as? Int ?? 0)
         case "image": chooseImage()
         case "pages":

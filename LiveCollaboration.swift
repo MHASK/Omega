@@ -14,6 +14,7 @@ struct LiveConfiguration: Codable, Equatable {
     @Published var configurations: [LiveConfiguration] = []
     @Published var status = "Not connected"
     @Published var peers: [String] = []
+    @Published private(set) var filePeople: [URL: [String]] = [:]
     @Published var active = false
     @Published var connecting = false
     private weak var bridge: EditorBridge?
@@ -64,11 +65,12 @@ struct LiveConfiguration: Codable, Equatable {
     }
     func isSharing(_ editor: EditorBridge?) -> Bool { bridge === editor && !identity.isEmpty && checkpoint != nil }
     var hasSession: Bool { checkpoint != nil }
+    func people(at url: URL) -> [String] { filePeople[url.standardizedFileURL] ?? [] }
     func revealBackups() { NSWorkspace.shared.open(directory) }
     func stop() {
         bridge?.webView?.evaluateJavaScript("window.folio.liveMessage({type:'offline'})", completionHandler: nil)
         generation = UUID(); retry?.cancel(); retry = nil; socket?.cancel(with: .goingAway, reason: nil); socket = nil
-        ready = false; active = false; connecting = false; peers = []; identity = ""; context = nil; checkpoint = nil; bridge = nil; stoppedForError = false
+        ready = false; active = false; connecting = false; peers = []; filePeople = [:]; identity = ""; context = nil; checkpoint = nil; bridge = nil; stoppedForError = false
     }
     func prepare(_ editor: EditorBridge) {
         guard let notebook = editor.notebook, !notebook.gitSyncing, let selected = notebook.selected,
@@ -166,6 +168,19 @@ struct LiveConfiguration: Codable, Equatable {
                     guard let message = try JSONSerialization.jsonObject(with: data) as? [String: Any], let type = message["type"] as? String else { throw GitFailure("Invalid relay reply") }
                     if type == "error" { stoppedForError = true; throw GitFailure(message["message"] as? String ?? "The relay rejected this connection.") }
                     if type == "peers" { peers = message["users"] as? [String] ?? []; continue }
+                    if type == "notebookPresence" {
+                        var next: [URL: [String]] = [:]
+                        let me = message["self"] as? String ?? ""
+                        for file in (message["files"] as? [[String: Any]] ?? []).prefix(100) {
+                            guard let path = file["path"] as? String, path.count <= 1000,
+                                  !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0.hasPrefix(".") || $0.contains("\\") }),
+                                  let users = file["users"] as? [String] else { continue }
+                            let url = context.0.url.appendingPathComponent(path).standardizedFileURL
+                            guard url.path.hasPrefix(context.0.path + "/") else { continue }
+                            next[url] = Array(Set(users.filter { $0 != me && !$0.isEmpty }.map { String($0.prefix(80)) })).sorted()
+                        }
+                        filePeople = next; continue
+                    }
                     if type == "ack" { if message["sequence"] as? Int == sequence { status = "Live · synced" }; continue }
                     if type == "state" { ready = true; active = true; connecting = false; status = "Live" }
                     if type == "state" || type == "update" || type == "awareness" {
@@ -174,7 +189,7 @@ struct LiveConfiguration: Codable, Equatable {
                 }
             } catch {
                 guard ticket == generation else { return }
-                ready = false; active = false; connecting = false; peers = []
+                ready = false; active = false; connecting = false; peers = []; filePeople = [:]
                 bridge?.webView?.evaluateJavaScript("window.folio.liveMessage({type:'offline'})", completionHandler: nil)
                 status = stoppedForError ? error.localizedDescription : "Offline · saved on this Mac"
                 if !stoppedForError {
@@ -189,6 +204,28 @@ struct LiveConfiguration: Codable, Equatable {
         status = "Live · syncing"
         // WebSocket sends are ordered; snapshots merge idempotently in Yjs.
         socket.send(.string(String(decoding: AssistantWire.json(message), as: UTF8.self))) { _ in }
+    }
+}
+
+struct FilePresenceView: View {
+    let url: URL
+    let scale: CGFloat
+    @ObservedObject private var live = LiveCollaboration.shared
+    var body: some View {
+        let people = live.people(at: url)
+        if !people.isEmpty {
+            HStack(spacing: -3 * scale) {
+                ForEach(Array(people.prefix(2)), id: \.self) { name in
+                    Text(String(name.prefix(1)).uppercased()).font(.system(size: 8 * scale, weight: .medium))
+                        .frame(width: 18 * scale, height: 18 * scale)
+                        .background(Color(nsColor: NotebookTint.lavender.color).opacity(0.18), in: Circle())
+                        .overlay(Circle().stroke(Color(nsColor: Ink.sidebar), lineWidth: 1.5))
+                }
+                if people.count > 2 { Text("+\(people.count - 2)").font(.system(size: 8 * scale)).padding(.leading, 5 * scale) }
+            }.foregroundStyle(Color(nsColor: Ink.sidebarText).opacity(0.8)).padding(.horizontal, 5 * scale)
+                .help(people.joined(separator: ", ") + " · here now")
+                .accessibilityElement(children: .ignore).accessibilityLabel(people.joined(separator: ", ") + " editing this note")
+        }
     }
 }
 

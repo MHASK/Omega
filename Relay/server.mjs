@@ -33,7 +33,7 @@ export async function verifyAccess(m,{allow=[],fetcher=fetch}={}){
   if(level<30||project.archived)fail();
  }
  if(!user.id||!project.id)fail();
- return {key:digest(JSON.stringify([s.provider,project.id,s.branch,s.path])),name:String(user.login||user.username).slice(0,80)};
+ return {key:digest(JSON.stringify([s.provider,project.id,s.branch,s.path])),notebook:digest(JSON.stringify([s.provider,project.id,s.branch])),name:String(user.login||user.username).slice(0,80)};
 }
 function decode(value){if(typeof value!=='string'||value.length>MAX_STATE*1.4||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))throw Error('Invalid update');return new Uint8Array(Buffer.from(value,'base64'));}
 const encode=data=>Buffer.from(data).toString('base64');
@@ -57,6 +57,13 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
  }
  const send=(ws,m)=>{if(ws.readyState===1){if(ws.bufferedAmount>8*1024*1024){ws.close(1013);return;}ws.send(JSON.stringify(m));}};
  const presence=r=>{const users=[...new Set([...r.clients].map(c=>c.person))];for(const c of r.clients)send(c,{type:'peers',users});};
+ // Only authenticated participants on the same repository ID and branch see
+ // file activity. This directory is derived from live sockets, never persisted.
+ const notebookPresence=notebook=>{
+  const group=[...rooms.values()].filter(r=>r.notebook===notebook&&r.clients.size);
+  const files=group.map(r=>({path:r.path,users:[...new Set([...r.clients].map(c=>c.person))].sort()}));
+  for(const r of group)for(const c of r.clients)send(c,{type:'notebookPresence',self:c.person,files});
+ };
  wss.on('connection',ws=>{
   let active=null,authorized=false,inflight=false,count=0,windowAt=Date.now();ws.alive=true;
   const authTimer=setTimeout(()=>ws.close(4003,'Sign in required'),12000);let expiry;
@@ -68,8 +75,9 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
     if(!authorized){
      if(inflight||m.type!=='join'||m.protocol!==1)throw Error('Sign in required');inflight=true;
      const identity=await verify(m);m.token=null;if(ws.readyState!==1)return;
-     const loaded=room(identity.key,m.seed);active=loaded.room;ws.person=identity.name;authorized=true;clearTimeout(authTimer);
+     const loaded=room(identity.key,m.seed);active=loaded.room;active.notebook=identity.notebook||identity.key;active.path=scope(m).path;ws.person=identity.name;authorized=true;clearTimeout(authTimer);
      active.clients.add(ws);send(ws,{type:'state',state:encode(Y.encodeStateAsUpdate(active.doc)),created:loaded.created,presence:true});active.presence.join(ws);presence(active);
+     notebookPresence(active.notebook);
      expiry=setTimeout(()=>ws.close(4001,'Refresh access'),sessionMS);return;
     }
     if(m.type==='update'){
@@ -86,7 +94,7 @@ export function createRelay({allow=[],verify=m=>verifyAccess(m,{allow}),sessionM
    }catch{send(ws,{type:'error',message:authorized?'The relay could not forward this change. Your local copy is safe.':'Could not join. Check the allowed repository and your GitHub or GitLab write access.'});ws.close(4003,'Request rejected');}
   });
   ws.on('error',()=>{});
-  ws.on('close',()=>{clearTimeout(authTimer);clearTimeout(expiry);if(active){active.clients.delete(ws);active.presence.leave(ws);presence(active);if(!active.clients.size){rooms.delete(active.key);active.presence.destroy();active.doc.destroy();}}});
+  ws.on('close',()=>{clearTimeout(authTimer);clearTimeout(expiry);if(active){active.clients.delete(ws);active.presence.leave(ws);presence(active);notebookPresence(active.notebook);if(!active.clients.size){rooms.delete(active.key);active.presence.destroy();active.doc.destroy();}}});
  });
  const heartbeat=setInterval(()=>{for(const ws of wss.clients){if(!ws.alive){ws.terminate();continue;}ws.alive=false;ws.ping();}for(const [ip,v] of attempts)if(Date.now()-v.at>60000)attempts.delete(ip);},30000);heartbeat.unref();
  return {server,async close(){clearInterval(heartbeat);for(const ws of wss.clients)ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>server.close(resolve));}};

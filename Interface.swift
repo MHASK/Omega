@@ -194,8 +194,13 @@ struct FolioView: View {
             }
             .overlay(alignment: .top) {
                 HStack(spacing: 0) {
-                    sidebarToolbar.frame(width: docked || (compact && notebook.sidebarOverlay) ? width : min(240 * toolbarScale, geometry.size.width))
+                    sidebarToolbar.frame(width: docked || (compact && notebook.sidebarOverlay) ? width : min(240 * toolbarScale, max(150, geometry.size.width - 142 * toolbarScale)))
                     WindowDragRegion().frame(maxWidth: .infinity).allowsHitTesting(!edgeTaskHeader)
+                    if !edgeTaskHeader && notebook.selected != nil && !(compact && notebook.sidebarOverlay) {
+                        DocumentToolbar(notebook: notebook)
+                            .padding(.trailing, 12 * toolbarScale)
+                            .padding(.top, max(0, 19 - 12 * toolbarScale))
+                    }
                 }.frame(height: headerHeight, alignment: .top)
             }
             .clipped()
@@ -487,6 +492,7 @@ struct NoteRow: View {
                         .foregroundStyle(selected ? rootTint : Color(nsColor: Ink.sidebarText))
                     Text(entry.name).font(.system(size: 12 * scale)).lineLimit(1)
                     Spacer(minLength: 0)
+                    if !entry.isFolder { FilePresenceView(url: entry.url, scale: scale) }
                 }.frame(height: 30 * scale).contentShape(Rectangle())
                     .onTapGesture { activate() }
                     .highPriorityGesture(DragGesture(minimumDistance: 6 * scale, coordinateSpace: .named("notebookTree"))

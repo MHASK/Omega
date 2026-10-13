@@ -97,6 +97,138 @@ import AppKit
     }
 }
 
+// Sharing is a view onto the repository's existing permissions, never a new ACL.
+struct DocumentToolbar: View {
+    @ObservedObject var notebook: Notebook
+    @State private var sharing = false
+    private var scale: CGFloat { min(CGFloat(notebook.zoom), 1.5) }
+    var body: some View {
+        HStack(spacing: 3 * scale) {
+            if !notebook.text.hasPrefix(TaskDocument.marker) {
+                if !notebook.documentIsSource {
+                    Button { sharing = false; notebook.richEditor?.command("comments") } label: {
+                        HStack(spacing: 4 * scale) {
+                            Image(systemName: "bubble.right").font(.system(size: 12 * scale))
+                            if notebook.documentComments > 0 { Text("\(notebook.documentComments)").font(.system(size: 9 * scale)).monospacedDigit() }
+                        }.frame(minWidth: 24 * scale, minHeight: 24 * scale)
+                    }.help("Comments").accessibilityLabel("Comments")
+                }
+                Button { sharing = false; notebook.richEditor?.command("appearance") } label: {
+                    Text("Aa").font(.system(size: 12 * scale)).frame(width: 28 * scale, height: 24 * scale)
+                }.help("Document appearance").accessibilityLabel("Document appearance")
+            }
+            Button { notebook.richEditor?.command("closeWriting"); sharing.toggle() } label: {
+                HStack(spacing: 5 * scale) { Image(systemName: "square.and.arrow.up").font(.system(size: 11 * scale)); Text("Share").font(.system(size: 11 * scale)) }
+                    .padding(.horizontal, 6 * scale).frame(height: 24 * scale)
+            }.help("Share this note").accessibilityLabel("Share this note")
+                .popover(isPresented: $sharing, arrowEdge: .bottom) { NoteSharingView(notebook: notebook) { sharing = false } }
+        }.buttonStyle(DocumentToolbarButtonStyle()).foregroundStyle(Color(nsColor: Ink.muted))
+        .onChange(of: notebook.selected) { _, _ in sharing = false }
+    }
+}
+
+private struct DocumentToolbarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { ToolbarButton(configuration: configuration) }
+    private struct ToolbarButton: View {
+        let configuration: Configuration
+        @State private var hovered = false
+        var body: some View { configuration.label.contentShape(Rectangle()).background(Color.primary.opacity(configuration.isPressed ? 0.09 : hovered ? 0.05 : 0), in: RoundedRectangle(cornerRadius: 4)).onHover { hovered = $0 } }
+    }
+}
+
+struct NoteSharingView: View {
+    @ObservedObject var notebook: Notebook
+    @ObservedObject private var git = GitNotebooks.shared
+    @ObservedObject private var live = LiveCollaboration.shared
+    var close: () -> Void
+    @State private var info: GitSnapshot?
+    @State private var published = false
+    @State private var loading = true
+    @State private var error = ""
+    @State private var copied = false
+    private var scale: CGFloat { min(CGFloat(notebook.zoom), 1.15) }
+    private var muted: Color { Color(nsColor: Ink.muted) }
+    private var entry: GitNotebook? { guard let note = notebook.selected else { return nil }; return git.notebooks.filter { note.path.hasPrefix($0.path + "/") }.max { $0.path.count < $1.path.count } }
+    private var relative: String { guard let entry, let note = notebook.selected else { return "" }; return String(note.path.dropFirst(entry.path.count + 1)) }
+    private var liveEnabled: Bool { live.configurations.contains { $0.folder == entry?.path && $0.enabled } }
+    private var people: [String] { notebook.selected.map { live.people(at: $0) } ?? [] }
+    private var fileLink: String? {
+        guard let info, let entry, !relative.isEmpty else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let branch = info.branch.addingPercentEncoding(withAllowedCharacters: allowed) ?? info.branch
+        let path = relative.split(separator: "/").map { String($0).addingPercentEncoding(withAllowedCharacters: allowed) ?? String($0) }.joined(separator: "/")
+        return "https://\(info.remote.host)/\(info.remote.project)/" + (entry.provider == .gitlab ? "-/blob/" : "blob/") + branch + "/" + path
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Share").font(.system(size: 12 * scale, weight: .semibold))
+                Spacer()
+                Button(action: close) { Image(systemName: "xmark").font(.system(size: 10 * scale)).frame(width: 22 * scale, height: 22 * scale) }.buttonStyle(.plain).foregroundStyle(muted).accessibilityLabel("Close sharing")
+            }.padding(.bottom, 12 * scale)
+            if entry == nil {
+                HStack(spacing: 8 * scale) { Image(systemName: "lock").foregroundStyle(muted); Text("Only on this Mac").fontWeight(.medium) }
+                Text("Connect a Git notebook to share notes with people who have access to its repository.").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).lineSpacing(3 * scale).padding(.top, 8 * scale)
+                divider
+                action("Set up sharing", icon: "arrow.up.right") { settings() }
+            } else if loading {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Checking notebook…").foregroundStyle(muted) }.padding(.vertical, 12)
+            } else if let info, let entry {
+                HStack(alignment: .top, spacing: 9 * scale) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(muted)
+                    VStack(alignment: .leading, spacing: 4 * scale) {
+                        Text(info.remote.project).fontWeight(.medium).textSelection(.enabled)
+                        Text(info.branch + " · " + relative).font(.system(size: 10 * scale)).foregroundStyle(muted).lineLimit(2).truncationMode(.middle)
+                    }
+                }
+                Text("Access is managed in \(entry.provider.rawValue) for the whole repository.").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).lineSpacing(3 * scale).padding(.top, 10 * scale)
+                HStack {
+                    action(copied ? "Copied" : "Copy note link", icon: copied ? "checkmark" : "link") {
+                        guard let fileLink else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(fileLink, forType: .string); copied = true
+                    }.disabled(!published)
+                    Spacer(minLength: 8)
+                    Button("Repository ↗") { if let url = URL(string: "https://" + info.remote.host + "/" + info.remote.project) { NSWorkspace.shared.open(url) } }.buttonStyle(.plain).foregroundStyle(muted)
+                }.padding(.top, 12 * scale)
+                Text(published ? "Opens the last synced version. A link doesn’t grant access." : "Sync the notebook before sharing this new note’s link.").font(.system(size: 9 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).padding(.top, 7 * scale)
+                divider
+                HStack {
+                    Circle().fill(Color(nsColor: live.active ? NotebookTint.mint.color : Ink.muted)).frame(width: 5 * scale, height: 5 * scale)
+                    Text("Live editing").fontWeight(.medium)
+                    Spacer()
+                    Button(liveEnabled ? "Pause" : "Enable") {
+                        if let configuration = live.configurations.first(where: { $0.folder == entry.path }) {
+                            if liveEnabled { live.leave(notebook: notebook) }
+                            live.configure(entry, address: configuration.endpoint, enabled: configuration.enabled == false, notebook: notebook)
+                        } else { settings() }
+                    }.buttonStyle(.plain).foregroundStyle(muted)
+                }
+                Text(liveEnabled ? (live.active ? (people.isEmpty ? "Just you here. Others can join this note." : people.joined(separator: ", ") + " here with you.") : live.status) : "Edit together using the same repository, branch and relay.").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).lineSpacing(3 * scale).padding(.top, 7 * scale)
+                divider
+                HStack { Text("Saved locally. Sync publishes to Git.").font(.system(size: 9 * scale)).foregroundStyle(muted); Spacer(minLength: 6); Button("Manage") { settings() }.buttonStyle(.plain) }
+            }
+            if !error.isEmpty { Text(error).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true).padding(.top, 8); Button("Open Git settings") { settings() }.buttonStyle(.plain).padding(.top, 12) }
+        }.font(.system(size: 11 * scale)).padding(16 * scale).frame(width: 300 * scale).background(Color(nsColor: Ink.paper))
+        .task(id: notebook.selected) {
+            guard let entry else { loading = false; return }
+            let path = relative
+            do {
+                let result = try await Task.detached {
+                    let runner = GitRunner(timeout: 10), snapshot = try runner.inspect(entry.url)
+                    let exists = try runner.git(["cat-file", "-e", "refs/remotes/origin/" + snapshot.branch + ":" + path], at: entry.url, allowFailure: true).status == 0
+                    return (snapshot, exists)
+                }.value
+                guard !Task.isCancelled else { return }; info = result.0; published = result.1
+            } catch { self.error = error.localizedDescription }
+            loading = false
+        }
+    }
+    private var divider: some View { Rectangle().fill(Color(nsColor: Ink.separator)).frame(height: 1).padding(.vertical, 14 * scale) }
+    private func action(_ title: String, icon: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) { Label(title, systemImage: icon).font(.system(size: 10 * scale, weight: .medium)).padding(.horizontal, 10 * scale).padding(.vertical, 7 * scale).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
+    }
+    private func settings() { close(); notebook.settingsDestination = "Git sync"; notebook.showingSettings = true }
+}
+
 struct SettingsGitView: View {
     @ObservedObject var notebook: Notebook
     @ObservedObject private var git = GitNotebooks.shared
@@ -170,7 +302,7 @@ struct SettingsGitView: View {
                     Button("Recovery copies") { live.revealBackups() }.buttonStyle(.plain).font(.system(size: 10 * scale)).foregroundStyle(muted)
                 }.padding(18 * scale).background(surface, in: RoundedRectangle(cornerRadius: 8 * scale)).overlay(RoundedRectangle(cornerRadius: 8 * scale).stroke(border, lineWidth: 1))
             }
-        }.onAppear { git.refreshAccounts(); selectedFolder = selected?.path ?? ""; relay = live.configurations.first(where: { $0.folder == selectedFolder })?.endpoint ?? "https://omega.naridon.com" }
+        }.onAppear { git.refreshAccounts(); selectedFolder = git.notebooks.first(where: { notebook.selected?.path.hasPrefix($0.path + "/") == true })?.path ?? selected?.path ?? ""; relay = live.configurations.first(where: { $0.folder == selectedFolder })?.endpoint ?? "https://omega.naridon.com" }
         .onChange(of: selectedFolder) { _, value in relay = live.configurations.first(where: { $0.folder == value })?.endpoint ?? "https://omega.naridon.com" }
         .sheet(isPresented: $cloning) { cloneSheet }
     }

@@ -25,6 +25,8 @@ A calm, local Markdown notes and tasks app for macOS. No account, no cloud works
 - Type `/` and filter by a block or action, including `/comment`, `/blue` and `/highlight`. Use ↑ / ↓ and Return. Type `@` to link a note, task, goal, or a collaborator currently present in the live session. Person mentions are references, not notifications.
 - Select text and choose **Comment** (`⌥⌘M`) or use the block menu. The comment button shows open threads, replies, and resolved threads. Text anchors move with edits. If the anchored text is removed, the thread and its original quote remain in the comments panel.
 
+The top-right window header has **Share**, **Comments**, and **Aa**. Color and highlight choices use compact tabs; comment threads have separate Open and Resolved views.
+
 Colors and underline use small, allowlisted inline HTML tags in Markdown. Comments use inline anchors and hidden `omega-comment` records in the same local file, so Git saves them too. Comment records merge as separate items in live editing; concurrent replies are retained. Use the latest Omega on every collaborating Mac for the new formatting schema. Font preferences stay local. Other Markdown readers may display the tags differently, but the underlying text remains available. No AI service or notification service is involved.
 
 ## Install and update
@@ -55,6 +57,10 @@ Omega calls the installed `gh` or `glab` credential helper for that host. It doe
 
 **Sync** saves the current note, commits changed Markdown/text notes and image/PDF attachments, merges incoming changes, then pushes. Existing repository history is shared too, so use a repository intended for these notes. Hidden files and unrelated new files are not automatically committed. Preferences, archive/favorite flags, undo history, and shared label colors remain local to each Mac. Nothing is uploaded until you choose Sync; ordinary notebooks remain local.
 
+**Share** in a note’s header shows its repository and branch, copies a link to the last synced version, and opens sharing setup for a local-only notebook. The repository owner or organization manages access in GitHub/GitLab; copying a note link does not invite anyone or change permissions. Repository access includes its files and history, not only the linked note. New notes need a Git sync before their link is available. There is no new Omega owner: each collaborator retains their local copy.
+
+For a team: use a dedicated repository, give collaborators write access, and connect the same repository and branch on each Mac. Their existing GitHub/GitLab CLI login is used. Enable the same trusted relay in **Settings → Git sync → Live editing** to edit together. Share does not automatically publish local notes or change repository visibility.
+
 Incoming merges are tested in a temporary worktree. Overlapping edits stop with your live files intact and local edits committed. Resolve that conflict with Git, then sync again. There are no force pushes or resets of working files. Staged changes or an unfinished merge/rebase block sync. File changes arriving during synchronization are preserved and may require another sync. A local Git backup reference is kept before accepting incoming changes.
 
 Git sync saves files and their history. Optional live editing shares concurrent changes through a memory-only relay; it requires a connected Git notebook and repository write access. The local assistant integration continues to use revision checks to protect concurrent writes.
@@ -83,7 +89,7 @@ Run native checks on an Apple silicon Mac:
 Run Git synchronization checks with two temporary repositories:
 
 ```sh
-xcrun swiftc GitSync.swift Tests/GitSyncCheck.swift -o /tmp/Omega-Git-Check
+xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o /tmp/Omega-Git-Check
 /tmp/Omega-Git-Check
 ```
 
@@ -114,7 +120,7 @@ Original code: [Apache License 2.0](LICENSE). Third-party components keep the li
 
 ### Live collaboration
 
-Settings → Git sync now includes **Live editing**. Connect the same Git repository and branch on each Mac, set your trusted relay address, and enable it. Open the same note to write together; the footer shows Live and the people present. Collaborators have a small pastel cursor with their verified GitHub/GitLab name and a soft highlight over selected text. Cursor positions follow the text as others edit, including when several people share the same paragraph. Notes, task fields, subtasks, and linked goals merge through Yjs. Local recovery remains active while offline.
+Settings → Git sync now includes **Live editing**. Connect the same Git repository and branch on each Mac, set your trusted relay address, and enable it. Open the same note to write together; the footer shows Live and the people present. While connected, small initials beside sidebar files show other people currently in those files on the same repository and branch. Hover to see their names. Offline or disconnected activity is not shown, and the relay stores no presence history. Collaborators have a small pastel cursor with their verified GitHub/GitLab name and a soft highlight over selected text. Cursor positions follow the text as others edit, including when several people share the same paragraph. Notes, task fields, subtasks, and linked goals merge through Yjs. Local recovery remains active while offline.
 
 The hosted relay for this installation is `https://omega.naridon.com`. It permits repositories under `MHASK` on GitHub and `ashiqwayanad007` on GitLab, with each participant's write permission checked separately. Other deployments can choose their own allowlist. No note is uploaded simply by installing the app.
 

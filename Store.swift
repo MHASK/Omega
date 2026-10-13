@@ -161,6 +161,8 @@ final class Notebook: ObservableObject {
     @Published var entries: [NoteEntry] = []
     @Published var selected: URL?
     @Published var text = ""
+    @Published var documentComments = 0
+    @Published var documentIsSource = false
     @Published var query = ""
     var settingsDestination: String?
     @Published var showingSettings = false
