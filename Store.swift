@@ -490,7 +490,18 @@ final class Notebook: ObservableObject {
             recovery.clear(url)
             diskText = text; dirty = false; status = historyError == nil ? "All changes saved" : "Note saved · undo history unavailable"
             return true
-        } catch { status = "Couldn’t save"; showError(error); return false }
+        } catch {
+            let preserved = recovery.hasCheckpoint(text, file: url)
+            status = preserved ? "Draft saved locally · couldn’t update note" : "Couldn’t save"
+            let error = error as NSError
+            NSLog("Omega save failed: %@ (%ld); executable available: %@; draft preserved: %@", error.domain, error.code,
+                  FolioUpdates.executablePath(getpid()) == nil ? "no" : "yes", preserved ? "yes" : "no")
+            let alert = NSAlert()
+            alert.messageText = "Couldn’t save “\(url.lastPathComponent)”"
+            alert.informativeText = error.localizedDescription + (preserved ? "\n\nYour latest edits are safe in Omega’s local recovery copy. They remain available after restarting Omega." : "\n\nKeep this window open and use File → Save a Copy to preserve your edits.")
+            alert.addButton(withTitle: "OK"); alert.runModal()
+            return false
+        }
     }
 
     @discardableResult

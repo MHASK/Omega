@@ -28,6 +28,10 @@ final class DraftRecovery {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Self.write(JSONEncoder().encode(Draft(path: file.path, original: original, text: text)), to: recordURL(file))
     }
+    func hasCheckpoint(_ text: String, file: URL) -> Bool {
+        guard let data = try? Data(contentsOf: recordURL(file)), let draft = try? JSONDecoder().decode(Draft.self, from: data) else { return false }
+        return draft.path == file.path && draft.text == text
+    }
     func clear(_ file: URL) { try? FileManager.default.removeItem(at: recordURL(file)) }
 
     @discardableResult func recover() throws -> [URL] {

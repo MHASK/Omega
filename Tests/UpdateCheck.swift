@@ -30,10 +30,17 @@ import AppKit
         let old = folder.appendingPathComponent("Old.app"), new = folder.appendingPathComponent("New.app")
         try fm.createDirectory(at: old, withIntermediateDirectories: true); try fm.createDirectory(at: new, withIntermediateDirectories: true)
         try Data("old".utf8).write(to: old.appendingPathComponent("version")); try Data("new".utf8).write(to: new.appendingPathComponent("version"))
-        _ = try fm.replaceItemAt(old, withItemAt: new, backupItemName: "Previous.app", options: [.withoutDeletingBackupItem])
+        let beforeSwap = try fm.attributesOfItem(atPath: new.appendingPathComponent("version").path)[.systemFileNumber] as! NSNumber
+        try FolioUpdates.swapApplications(old, new)
         let next = try String(contentsOf: old.appendingPathComponent("version"), encoding: .utf8)
-        let previous = try String(contentsOf: folder.appendingPathComponent("Previous.app/version"), encoding: .utf8)
-        precondition(next == "new" && previous == "old")
+        let previous = try String(contentsOf: new.appendingPathComponent("version"), encoding: .utf8)
+        let afterSwap = try fm.attributesOfItem(atPath: old.appendingPathComponent("version").path)[.systemFileNumber] as! NSNumber
+        precondition(next == "new" && previous == "old" && beforeSwap == afterSwap)
+        // A running executable remains discoverable after installation. Losing
+        // this path makes macOS privacy checks reject otherwise-readable notes.
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().path
+        precondition(FolioUpdates.executablePath(getpid()) == executable)
+        print("PASS: atomic bundle swap preserves executable inode and process path lookup")
         let version = try FolioUpdates.info(app)["CFBundleShortVersionString"] as! String
         let manifest = OmegaUpdateManifest(schema: 1, version: version, build: build, architecture: "arm64", minimumSystemVersion: "14.0", archive: "https://github.com/MHASK/Omega/releases/download/v\(version)/Omega-\(version).zip", sha256: String(repeating: "a", count: 64), size: 3000)
         _ = try manifest.validate(repository: "MHASK/Omega")

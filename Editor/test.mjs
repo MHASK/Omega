@@ -411,3 +411,34 @@ const rj=mergeGitCheckpoints({mine:cp(ra),incoming:cp(rb)});
 assert(rj.text.includes('Title changed')&&rj.text.includes('Words here and there.'),'Rich shared state preserves independent offline edits');
 for(const doc of [common,left,right,final,unrelated,rich,ra,rb])doc.destroy();
 console.log('PASS: Git CRDT merge, idempotence, outside edits, reviewed resolution, lineage rejection, and rich text projection.');
+
+// Block moves are a single, lossless transaction, including nested list content.
+import {blockAt,moveBlock} from './block-tools.js';
+function movingNote(markdown){return new Editor({element:document.createElement('div'),extensions:extensions(),content:markdown,contentType:'markdown'});}
+function namedBlock(e,text){let at;e.state.doc.descendants((n,p)=>{if(n.isText&&n.text.includes(text))at=p;});return blockAt(e,at);}
+for(const [note,sourceName,targetName] of [
+ ['# Title\n\nFirst **bold**.\n\n## Last','First','Last'],
+ ['# Title\n\n- First\n  - Nested **child**\n- Second\n- Third','First','Third'],
+ ['# Title\n\n- [x] Finished\n  - Child\n- [ ] Pending','Finished','Pending'],
+ ['# Title\n\n- Only\n  - Nested\n\n## Last','Only','Last'],
+ ['# Title\n\n- First\n\n## Between\n\n- Last','First','Last'],
+ ['# Title\n\n| Name | Value |\n| --- | --- |\n| Alpha | **42** |\n\n## Last','Alpha','Last'],
+]){
+ const e=movingNote(note),before=e.state.doc,sourceBlock=namedBlock(e,sourceName),target=namedBlock(e,targetName).to;
+ // jsdom has no layout; inspect model changes without the view's scroll routine.
+ e.view.scrollToSelection=()=>{};
+ assert(moveBlock(e,sourceBlock,target));e.state.doc.check();
+ const after=e.state.doc;
+ let occurrences=0;after.descendants(n=>{if(n.eq(sourceBlock.node))occurrences++;});
+ assert.equal(occurrences,1,'Moved block stays intact exactly once');
+ assert(after.textContent.indexOf(sourceName)>after.textContent.indexOf(targetName));
+ assert(e.commands.undo());assert(e.state.doc.eq(before),'One undo restores the complete original document');
+ assert(e.commands.redo());assert(e.state.doc.eq(after));
+ assert.deepEqual(e.schema.nodeFromJSON(e.markdown.parse(e.getMarkdown())).toJSON(),after.toJSON(),'Move survives save/reopen');
+ e.destroy();
+}
+const safeMove=movingNote('# Start\n\n- One\n- Two\n\nEnd'),safeBefore=safeMove.state.doc,one=namedBlock(safeMove,'One');
+for(const target of [one.from,one.from+2,one.to,-1,safeBefore.content.size+1])assert.equal(moveBlock(safeMove,one,target),false);
+assert(safeMove.state.doc.eq(safeBefore));
+safeMove.commands.insertContent('Changed');const movedStale=safeMove.state.doc;assert.equal(moveBlock(safeMove,one,movedStale.content.size),false);assert(safeMove.state.doc.eq(movedStale));safeMove.destroy();
+console.log('PASS: block moves preserve nested content and formatting, remove empty lists, move across lists and tables, save/reopen, reject stale/invalid positions, and undo/redo in one step.');

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Darwin
 import Security
 import UniformTypeIdentifiers
 
@@ -75,7 +76,7 @@ enum FolioUpdates {
                     let planURL = backup.appendingPathComponent("update.json")
                     try JSONEncoder().encode(plan).write(to: planURL, options: .atomic)
                     let helperApp = backup.appendingPathComponent("Update Helper.app")
-                    try fm.copyItem(at: current, to: helperApp)
+                    try fm.copyItem(at: candidate, to: helperApp)
                     let process = Process(); process.executableURL = helperApp.appendingPathComponent("Contents/MacOS/Folio"); process.arguments = ["--finish-update", planURL.path]; try process.run()
                     notebook.reading = true; willQuit(); NSApp.terminate(nil)
                 } catch { try? fm.removeItem(at: staged); throw error }
@@ -98,10 +99,43 @@ enum FolioUpdates {
             try fm.copyItem(at: file, to: target)
         }
     }
+    // Swap the bundle directories themselves. Foundation's replaceItemAt may
+    // rebuild a directory's contents; the executable must retain its inode.
+    static func swapApplications(_ installed: URL, _ staged: URL) throws {
+        guard installed.deletingLastPathComponent().standardizedFileURL == staged.deletingLastPathComponent().standardizedFileURL else {
+            throw Failure(message: "The app update must be staged beside the installed application.")
+        }
+        let result = installed.withUnsafeFileSystemRepresentation { old in
+            staged.withUnsafeFileSystemRepresentation { new in renamex_np(old!, new!, UInt32(RENAME_SWAP)) }
+        }
+        guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+    }
+    static func executablePath(_ pid: Int32) -> String? {
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return nil }
+        return String(cString: path)
+    }
+    @MainActor static func launchInstalled(_ app: URL) throws {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        var result: Result<NSRunningApplication, Error>?
+        NSWorkspace.shared.openApplication(at: app, configuration: configuration) { application, error in
+            if let application { result = .success(application) }
+            else { result = .failure(error ?? Failure(message: "The updated app couldn't be opened.")) }
+        }
+        let deadline = Date().addingTimeInterval(20)
+        while result == nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        guard let result else { throw Failure(message: "Omega didn't finish restarting. Open it from Applications.") }
+        let running = try result.get(), expected = app.appendingPathComponent("Contents/MacOS/Folio").standardizedFileURL.path
+        guard executablePath(running.processIdentifier) == expected else {
+            // Never roll an app bundle back underneath a running process.
+            throw Failure(message: "Omega restarted from an unexpected location. Quit it, then reopen it from Applications. Your saved notes are safe.")
+        }
+    }
     @MainActor static func finish(planURL: URL) -> Int32 {
         let fm = FileManager.default
         var plan: Plan?
-        var replaced = false
+        var replaced = false, launchStarted = false
         do {
             let value = try JSONDecoder().decode(Plan.self, from: Data(contentsOf: planURL)); plan = value
             guard ["Folio.app", "Omega.app"].contains(value.installed.lastPathComponent), value.staged.lastPathComponent.hasPrefix(".Folio-update-"), value.staged.deletingLastPathComponent() == value.installed.deletingLastPathComponent(), value.backup.path.hasPrefix(backupRoot.path + "/"), value.pid > 1 else { throw Failure(message: "Invalid update plan.") }
@@ -126,24 +160,27 @@ enum FolioUpdates {
             try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]).write(to: notes.appendingPathComponent("Paths.json"))
             try fm.copyItem(at: value.installed, to: savedApp)
             // Atomic same-volume replacement: on failure the original stays usable.
-            _ = try fm.replaceItemAt(value.installed, withItemAt: value.staged, backupItemName: ".Folio-previous-" + UUID().uuidString + ".app", options: [])
+            try swapApplications(value.installed, value.staged)
             replaced = true
             try verify(value.installed)
-            let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/open"); process.arguments = ["-n", value.installed.path]; try process.run(); process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw Failure(message: "The updated app couldn't be opened.") }
+            // Once launch starts, leave this verified bundle in place even if
+            // Launch Services times out; replacing it again can revoke file access.
+            replaced = false; launchStarted = true
+            try launchInstalled(value.installed)
+            try? fm.removeItem(at: value.staged)
             try? fm.removeItem(at: planURL)
             return 0
         } catch {
             if let plan {
                 if replaced {
                     let restored = plan.installed.deletingLastPathComponent().appendingPathComponent(".Folio-restore-" + UUID().uuidString + ".app")
-                    do { try fm.copyItem(at: plan.backup.appendingPathComponent("Folio.app"), to: restored); _ = try fm.replaceItemAt(plan.installed, withItemAt: restored) } catch { /* The backup remains available. */ }
+                    do { try fm.copyItem(at: plan.backup.appendingPathComponent("Folio.app"), to: restored); try swapApplications(plan.installed, restored); try? fm.removeItem(at: restored) } catch { /* The backup remains available. */ }
                 }
                 try? fm.removeItem(at: plan.staged)
                 let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/open"); process.arguments = [plan.installed.path]; try? process.run()
             }
             let app = NSApplication.shared; app.setActivationPolicy(.accessory)
-            let alert = NSAlert(); alert.messageText = "The update wasn't installed"; alert.informativeText = error.localizedDescription + "\nYour notes and the previous app are preserved."; alert.runModal()
+            let alert = NSAlert(); alert.messageText = launchStarted ? "Omega needs to be reopened" : "The update wasn't installed"; alert.informativeText = error.localizedDescription + "\nYour notes and the previous app are preserved."; alert.runModal()
             return 1
         }
     }

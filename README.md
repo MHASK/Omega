@@ -21,7 +21,7 @@ A calm, local Markdown notes and tasks app for macOS. No account, no cloud works
 
 - **Aa** at the top right changes document text size, Default / Serif / Mono typeface, and full width. The sidebar, tasks board and menus keep their own size. These are personal preferences on this Mac; `⌥⌘ +`, `⌥⌘ −` and `⌥⌘ 0` adjust/reset document size.
 - Select text for bold, italic, underline, strikethrough, links, nine soft text colors and nine highlights. The color picker has a Default option to clear each style separately.
-- Hover beside a block for **+** and a drag handle. Open the handle for type conversion, color, comments, duplication, movement, deletion, and word/character count. Drag within a list or between top-level blocks; Undo restores changes.
+- Hover beside a block for **+** and a drag handle. Open the handle for type conversion, color, comments, duplication, movement, deletion, and word/character count. Hold and drag the handle to a drop marker. List items carry their nested content between lists or into their own list, and the document scrolls near its edges. Escape cancels; one Undo restores the move.
 - Type `/` and filter by a block or action, including `/comment`, `/blue` and `/highlight`. Use ↑ / ↓ and Return. Type `@` to link a note, task, goal, or a collaborator currently present in the live session. Person mentions are references, not notifications.
 - Select text and choose **Comment** (`⌥⌘M`) or use the block menu. The comment button shows open threads, replies, and resolved threads. Text anchors move with edits. If the anchored text is removed, the thread and its original quote remain in the comments panel.
 

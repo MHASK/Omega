@@ -16,19 +16,28 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
 }
 @MainActor final class WritingWebCheck: NSObject, WKScriptMessageHandler {
     var views: [WKWebView] = [], windows: [NSWindow] = [], loaded = 0, done = false, failed = false, sharing = true
+    let interactive = CommandLine.arguments.contains("--interactive")
     var state = "", checkpoints: [Int: [String:Any]] = [:], conflicts = 0
     func start(_ root: URL) {
         _ = NSApplication.shared
         for _ in 0..<2 {
             let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.setURLSchemeHandler(WritingTestFiles(root), forURLScheme: "folio"); config.userContentController.add(self, name:"folio")
             let view = WKWebView(frame:NSRect(x:0,y:0,width:950,height:700),configuration:config)
-            let window = NSWindow(contentRect:view.frame,styleMask:[.titled],backing:.buffered,defer:false);window.contentView=view
+            let window = NSWindow(contentRect:view.frame,styleMask:[.titled],backing:.buffered,defer:false);window.contentView=view;window.acceptsMouseMovedEvents=true
             views.append(view); windows.append(window);view.load(URLRequest(url:URL(string:"folio://app/index.html")!))
         }
     }
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body=message.body as? [String:Any],let type=body["type"] as? String,let index=views.firstIndex(where: {$0 === message.webView}) else {return}
-        if type=="ready" {loaded+=1;if loaded==2 {Task {await run()}};return}
+        if type=="ready" {loaded+=1;if loaded==2 {Task {
+            if interactive {
+                try? await load(0,"# Move a little\n\n## Plans for today\n\n- First item\n  - A nested thought\n- Second item\n- Third item\n\nA quiet final paragraph.\n")
+                NSApp.setActivationPolicy(.regular);windows[0].title="Omega block drag check";windows[0].setFrameTopLeftPoint(NSPoint(x:0,y:NSScreen.main!.visibleFrame.maxY));windows[0].makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
+            } else {await run()}
+        }};return}
+        if interactive && type=="change",let text=body["text"] as? String {
+            try? text.write(to:URL(fileURLWithPath:CommandLine.arguments[2]).appendingPathComponent("native-drag-result.md"),atomically:true,encoding:.utf8)
+        }
         if type=="pages" {let reply:[String:Any]=["id":"live","request":body["request"]!,"pages":[["name":"A linked note","location":"Notebook","href":"./Linked.md"]]];views[index].evaluateJavaScript("window.folio.pageResults(\(json(reply)))",completionHandler:nil);return}
         if type=="liveConflict" { conflicts+=1; return }
         if type=="liveReady",let seed=body["state"] as? String {
@@ -60,6 +69,24 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
         """);try await settle()
     }
     func click(_ i:Int,_ selector:String) async throws {_ = try await js(i,"document.querySelector(\(json([selector]))[0]).click();true");try await settle()}
+    func drag(_ source:String,_ target:String,cancel:Bool=false) async throws {
+        _ = try await js(0,"""
+        (()=>{
+          const source=document.querySelector(\(json([source]))[0]),target=document.querySelector(\(json([target]))[0]);
+          const r=source.getBoundingClientRect(),t=target.getBoundingClientRect();
+          source.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:r.left+10,clientY:r.top+5}));
+          const h=document.querySelector('.block-tools button:last-child'),b=h.getBoundingClientRect();
+          h.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:17,button:0,clientX:b.left+8,clientY:b.top+8}));
+          document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:17,buttons:1,clientX:t.left+10,clientY:t.bottom-1}));
+          window.dragTestPoint={x:t.left+10,y:t.bottom-1};return true;
+        })()
+        """);try await settle()
+        try check(try await js(0,"!document.querySelector('.block-drop-guide').hidden") as! Bool,"drag presents a valid drop marker")
+        try await screenshot("writing-block-drag")
+        _ = try await js(0,cancel ? "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));true" : "document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,pointerId:17,clientX:window.dragTestPoint.x,clientY:window.dragTestPoint.y}));true")
+        try await settle()
+        try check(try await js(0,"document.querySelector('.block-drop-guide').hidden&&!document.body.classList.contains('block-dragging')&&document.querySelector('.block-menu').hidden") as! Bool,"drop clears drag UI without opening block actions")
+    }
     func screenshot(_ name:String) async throws {
         let image=try await views[0].takeSnapshot(configuration:nil)
         if let tiff=image.tiffRepresentation,let png=NSBitmapImageRep(data:tiff)?.representation(using:.png,properties:[:]){try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]).appendingPathComponent(name+".png"))}
@@ -110,6 +137,28 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
             _ = try await js(0,"document.execCommand('insertText',false,'@');true");try await settle()
             try check(try await js(0,"!document.querySelector('#page-picker').hidden") as! Bool,"typing @ opens the mention picker")
             try await click(0,"#page-results button");try check(try await text(0).contains("[A linked note](./Linked.md)"),"mention inserts a real local Markdown link")
+            let dragNote="# Moving blocks\n\n## A heading\n\n- First **item**\n  - Nested child\n- Second item\n- Third item\n\nA final paragraph.\n"
+            try await load(0,dragNote)
+            let beforeDrag=try await text(0)
+            try await drag("#editor .tiptap > ul > li:first-child","#editor .tiptap > ul > li:last-child",cancel:true)
+            try check(try await text(0)==beforeDrag,"Escape cancels movement without editing the document")
+            try await drag("#editor .tiptap > ul > li:first-child","#editor .tiptap > ul > li:last-child")
+            let dragged=try await text(0)
+            try check(dragged.range(of:"Third item")!.lowerBound<dragged.range(of:"First **item**")!.lowerBound && dragged.contains("Nested child"),"pointer drag reorders a list item with its nested children and formatting")
+            try await load(0,dragged)
+            try check(try await text(0)==dragged,"dragged Markdown reopens intact")
+            try await load(0,dragNote)
+            try await drag("#editor .tiptap h2","#editor .tiptap > ul > li:last-child")
+            let headingMoved=try await text(0)
+            try check(headingMoved.range(of:"Third item")!.lowerBound<headingMoved.range(of:"## A heading")!.lowerBound,"heading drops after a whole list even when targeting its last item")
+            let longDragNote="# Long note\n\n"+(0..<60).map { "Paragraph \($0)." }.joined(separator:"\n\n")
+            try await load(0,longDragNote)
+            _ = try await js(0,"""
+            (()=>{const p=document.querySelector('#editor .tiptap > p'),r=p.getBoundingClientRect();p.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:r.left+10,clientY:r.top+5}));const h=document.querySelector('.block-tools button:last-child'),b=h.getBoundingClientRect();h.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:20,button:0,clientX:b.left+8,clientY:b.top+8}));document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:20,buttons:1,clientX:300,clientY:innerHeight-3}));return true})()
+            """);try await settle()
+            try check(try await js(0,"document.querySelector('#scroller').scrollTop>0") as! Bool,"dragging near the bottom scrolls a long document")
+            _ = try await js(0,"document.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:20}));true");try await settle()
+            try check(try await text(0)==longDragNote,"pointer cancellation leaves a long document unchanged")
             // Responsive controls and source-mode appearance use the same preference.
             views[0].setFrameSize(NSSize(width:360,height:640));try await load(0,note);try await click(0,".note-tools button:last-child");try await screenshot("writing-narrow")
             try check(try await js(0,"(()=>{const r=document.querySelector('.writing-panel').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth})()") as! Bool,"appearance panel stays inside a narrow window")
@@ -127,5 +176,5 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
 }
 
 @main struct Main {
-    @MainActor static func main(){let test=WritingWebCheck();test.start(URL(fileURLWithPath:CommandLine.arguments[1]));let deadline=Date().addingTimeInterval(90);while !test.done && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.03))};exit(test.done && !test.failed ? 0 : 1)}
+    @MainActor static func main(){let test=WritingWebCheck();test.start(URL(fileURLWithPath:CommandLine.arguments[1]));if test.interactive { NSApp.run(); return };let deadline=Date().addingTimeInterval(test.interactive ? 1800 : 90);while !test.done && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.03))};exit(test.done && !test.failed ? 0 : 1)}
 }
