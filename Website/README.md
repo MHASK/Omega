@@ -11,7 +11,20 @@ node Website/build.mjs
 python3 -m http.server 8765 --bind 127.0.0.1 --directory Website/dist
 ```
 
-Open <http://127.0.0.1:8765>. The build copies the existing Omega icon and bundled editor into `dist/`. The read-only preview uses synthetic notes and tasks with the real editor, isolated from all local notebooks. Other feature illustrations are illustrative, not live sessions. No relay connection is made by the website.
+Open <http://127.0.0.1:8765>. The build copies the Omega icon and native app screenshots into `dist/`. Notes/Tasks switches between captures of the real Mac app. The screenshots link to their full-size originals. There is no browser editor, recreated app chrome, fictional chat interface, or simulated live session. No relay connection is made by the website.
+
+## Product screenshots
+
+`screenshots/` contains unretouched native window captures made on October 14, 2026 from release **v1.3.6** (`d57a454c36a7bddc4cc799b6dce4495210cc76a7`):
+
+- `notes.jpg`: notes, native sidebar, document controls, search, archive, and footer.
+- `tasks-board.jpg`: board with actual task/subtask cards and goal progress.
+- `tasks-list.jpg`: list with an expanded task and its subtasks.
+- `writing.jpg`: document appearance popover.
+
+The release's unmodified views and editor were run in an isolated capture app with a synthetic notebook, separate defaults and recovery, dark appearance, default 140% app zoom, and a 1440 × 900 window. Captures are 2880 × 1800. Only launch setup and sample content differed; no view, icon, typography, spacing, color, or editor style was changed. No personal notebooks or credentials appear in the images.
+
+When refreshing screenshots, use the current released app UI and fresh sample content. Capture through the native app; do not redraw controls, overlay invented features, recolor the interface, or patch the screenshot. Keep the entire window's aspect ratio when displaying it.
 
 Download links begin at GitHub's latest release page, then resolve the latest official DMG through GitHub's public release API. If that request is unavailable or rate-limited, the release page remains usable. Visitors' browsers contact GitHub for that lookup; no analytics identifiers are used.
 
@@ -25,4 +38,4 @@ For a different host or domain, change the hostname and website root in `Caddyfi
 
 ## Verify
 
-Check Notes/Tasks switching, task List/Board navigation, keyboard tab switching, FAQ expansion, release links, image/font loading, and narrow screens. After deployment, verify the homepage and `/health`, and make a WebSocket handshake to `/live`. The relay process should have the same PID and start time before and after the website deployment.
+Check Notes/Tasks screenshot switching, full-size image links, keyboard tab switching, FAQ expansion, release links, image loading, and narrow screens. Verify that every app image comes from `screenshots/`, without added HTML controls or cropping. After deployment, verify the homepage and `/health`, and make a WebSocket handshake to `/live`. The relay process should have the same PID and start time before and after the website deployment.

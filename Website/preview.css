@@ -1,2 +1,0 @@
-/* The shipping editor, read-only and constrained to a sample notebook. */
-:root{--body-size:16px}#scroller{padding-top:40px!important;padding-bottom:40px!important}#editor{max-width:640px!important}.ProseMirror h1{font-size:30px!important}.tasks-heading{padding-top:25px!important}.tasks-heading .tasks-title{font-size:24px!important}.task-add-container,#mode{display:none!important}#task-page{padding-bottom:25px!important}body{user-select:text}#editor .ProseMirror{min-height:0!important}

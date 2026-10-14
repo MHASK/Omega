@@ -1,16 +1,20 @@
-const preview=document.querySelector('iframe'),tabs=[...document.querySelectorAll('[role="tab"][data-preview]')];
-let current='notes';
+const preview=document.querySelector('#preview-image'),tabs=[...document.querySelectorAll('[role="tab"][data-preview]')];
+const captures={
+ notes:{file:'notes.jpg',alt:'The released Omega Mac app: real notebook sidebar, notes editor, document controls, search, archive, and footer. Sample notes shown.'},
+ tasks:{file:'tasks-board.jpg',alt:'The released Omega Mac app: real task board, nested subtask cards, pastel labels, linked goals, completion rings, and notebook sidebar. Sample tasks shown.'}
+};
 function setPreview(view){
- current=view;
+ const capture=captures[view];if(!capture)return;
  for(const tab of tabs){const selected=tab.dataset.preview===view;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;}
- document.querySelectorAll('.sample-page').forEach(button=>button.classList.toggle('selected',button.dataset.preview===view));
  document.querySelector('#preview-panel').setAttribute('aria-labelledby',view+'-tab');
- document.querySelector('#preview-breadcrumb').textContent='Projects / '+(view==='notes'?'A little room to think':'The next chapter');
- preview.contentWindow?.postMessage({type:'omega-preview',view},location.origin);
+ const source='/assets/screenshots/'+capture.file;
+ preview.src=source;preview.alt=capture.alt;
+ document.querySelector('#preview-fullsize').href=source;
+ document.querySelector('#preview-fullsize').setAttribute('aria-label','View the full-size Omega '+view+' screenshot');
+ document.querySelector('#preview-image-link').href=source;
 }
 for(const button of document.querySelectorAll('[data-preview]'))button.addEventListener('click',()=>{setPreview(button.dataset.preview);if(button.classList.contains('preview-jump'))document.querySelector('#product').scrollIntoView({block:'start'});});
 for(const tab of tabs)tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const target=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs.find(t=>t!==tab);setPreview(target.dataset.preview);target.focus();});
-window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===preview.contentWindow&&event.data?.type==='omega-preview-ready')setPreview(current);});
 // The release page is a permanent fallback. Resolve the current official DMG,
 // without pinning the website to a version. No visitor identifiers are sent.
 fetch('https://api.github.com/repos/MHASK/Omega/releases/latest',{credentials:'omit',referrerPolicy:'no-referrer'})
