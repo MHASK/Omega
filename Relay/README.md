@@ -4,15 +4,32 @@ A small self-hosted WebSocket service for live notes, task pages, subtasks, and 
 
 ## Run with HTTPS
 
-Point a domain at your server. Install Docker and Compose, then run from this directory:
+You need a server with Docker and Docker Compose, a domain pointing to that server, and a GitHub or GitLab repository for your team's notes. Open ports 80 and 443 on the server; keep port 8787 private. Give each collaborator write access to the repository. The Mac app and the relay are both open source under Apache 2.0; there is no Omega account or license key.
+
+Get the relay source:
 
 ```sh
-export OMEGA_DOMAIN=notes.example.com
-export OMEGA_ALLOWED_REPOS='github:your-team/notes,gitlab:your-group/notes'
-docker compose up -d --build
+git clone https://github.com/MHASK/Omega.git
+cd Omega/Relay
 ```
 
-Open ports 80 and 443. Caddy obtains and renews the TLS certificate. Keep port 8787 private. The relay has no data volume. Only Caddy stores TLS certificates and its configuration; there is no note content in those volumes. To update, run `docker compose up -d --build`. Use one relay process: active rooms exist only in its memory.
+Create a `.env` file in this directory with your domain and allowed repositories (replace these examples). This file contains configuration, not Git credentials:
+
+```dotenv
+OMEGA_DOMAIN=notes.example.com
+OMEGA_ALLOWED_REPOS=github:your-team/notes,gitlab:your-group/notes
+```
+
+Start the relay and check it:
+
+```sh
+docker compose up -d --build
+curl -fsS https://notes.example.com/health
+```
+
+Caddy obtains and renews the TLS certificate. Once HTTPS is ready, the health check returns JSON with `"ok":true`. The relay has no data volume. Only Caddy stores TLS certificates and its configuration; there is no note content in those volumes. Use one relay process: active rooms exist only in its memory.
+
+To update from the same directory, run `git pull --ff-only` and `docker compose up -d --build`. A relay restart briefly disconnects live editing; clients reconnect and restore rooms from their locally saved state. Git remains the durable shared history. Check service logs with `docker compose logs --tail=50`; logs exclude note text and credentials.
 
 For a service manager without Docker:
 
@@ -25,9 +42,12 @@ Put an HTTPS reverse proxy in front of `127.0.0.1:8787`. `/health` reports proto
 
 ## Connect Omega
 
-1. Each collaborator clones the same repository and branch in Settings → Git sync.
-2. Set this relay's HTTPS address under **Live editing**, then enable it for that notebook.
-3. Open the same relative note path. Pastel named cursors and selection highlights show where collaborators are working. **Live** in the document footer shows the connection and the people present. The sidebar shows other people’s initials beside active files in the same repository and branch while you are connected.
+1. Install [Omega for Mac](https://github.com/MHASK/Omega/releases/latest) on each Apple silicon Mac running macOS 14 or later. Sign in with the existing GitHub CLI (`gh auth login`) or GitLab CLI (`glab auth login`) if not already signed in.
+2. Each collaborator clones the same repository and branch in Settings → Git sync.
+3. Set this relay's HTTPS address, such as `https://notes.example.com`, under **Live editing**, then enable it for that notebook.
+4. Open the same relative note path. Pastel named cursors and selection highlights show where collaborators are working. **Live** in the document footer shows the connection and the people present. The sidebar shows other people’s initials beside active files in the same repository and branch while you are connected.
+
+The relay at `omega.naridon.com` has a maintainer-controlled repository allowlist. Self-hosting gives your team its own endpoint and allowlist; it does not depend on access to that public relay.
 
 Only open notes use live editing. Other files, new files, moves, and image attachments travel through Git sync. Automatic Git sync runs alongside live editing. Compatible checkpoints merge into the open editor without reconnecting, and file conflicts are reviewed inside Omega. Git carries the durable shared state; the relay remains memory-only. A first-time join with different contents offers a local recovery copy before adopting the shared version. The app's recovery folder is available from the live settings card.
 
@@ -42,7 +62,7 @@ Repository host support is currently github.com and gitlab.com. The relay's allo
 - Yjs updates converge under concurrent/offline edits. Rich notes use Tiptap's collaboration binding. Extended Markdown uses a shared text field. Tasks use individual shared text fields, label/goal sets, and independent properties; simultaneous changes to the same scalar property resolve deterministically. Undo during a live session affects that author's changes. The normal Markdown recovery/history remains on disk; collaborative undo stacks themselves restart with the session.
 - A transient notebook directory broadcasts active file paths and verified usernames to authenticated participants on the same repository ID and branch. It contains no note text, never crosses repositories or branches, and clears entries when their last connection leaves. Older clients ignore this additional message.
 - Presence uses Yjs Awareness, separate from the document: no cursor, selection, or presence identity is included in saved Markdown or CRDT checkpoints. The relay replaces claimed names/colors with its authenticated identity and palette, prevents a connection from impersonating another cursor, isolates presence by room, and removes it on disconnect. Task descriptions currently show a named field indicator; visual/source notes and task titles have precise carets.
-- Before publishing an edit, Omega saves a local Markdown recovery checkpoint and writes shared state into `.omega/live/<note-path-sha256>.json` inside the Git notebook. Git Sync commits this state alongside Markdown and attachments. A relay acknowledgement means only that a change was forwarded in memory, not saved remotely. Closing a disconnected editor keeps its local updates for the next join. Git push remains an explicit action; unpushed work is on that Mac only.
+- Before publishing an edit, Omega saves a local Markdown recovery checkpoint and writes shared state into `.omega/live/<note-path-sha256>.json` inside the Git notebook. Git Sync commits this state alongside Markdown and attachments. A relay acknowledgement means only that a change was forwarded in memory, not saved remotely. Closing a disconnected editor keeps its local updates for the next join. Connected Git notebooks sync automatically by default; **Sync now** is also available. Until a push succeeds, new work remains on that Mac and any connected peers only.
 - Limits: 4 MiB CRDT state per note, 100 active rooms, 100 simultaneous sockets, bounded message and connection rates. Yjs tombstones count toward the state limit. There are no stored rooms, note databases, server histories, or note backups. Durable data stays in local files and Git. Concurrent offline Git edits can conflict; sync preserves both commits and leaves the working files untouched for resolution. Keep local/Git backups for protection against loss of a Mac.
 - Source/visual format changes require pausing live editing. Assistants can edit through the existing revision-checked MCP interface; those edits propagate into an active live note.
 

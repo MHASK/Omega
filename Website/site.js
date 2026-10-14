@@ -9,9 +9,6 @@ function setPreview(view){
  document.querySelector('#preview-panel').setAttribute('aria-labelledby',view+'-tab');
  const source='/assets/screenshots/'+capture.file;
  preview.src=source;preview.alt=capture.alt;
- document.querySelector('#preview-fullsize').href=source;
- document.querySelector('#preview-fullsize').setAttribute('aria-label','View the full-size Omega '+view+' screenshot');
- document.querySelector('#preview-image-link').href=source;
 }
 for(const button of document.querySelectorAll('[data-preview]'))button.addEventListener('click',()=>{setPreview(button.dataset.preview);if(button.classList.contains('preview-jump'))document.querySelector('#product').scrollIntoView({block:'start'});});
 for(const tab of tabs)tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const target=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs.find(t=>t!==tab);setPreview(target.dataset.preview);target.focus();});

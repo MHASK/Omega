@@ -6,9 +6,9 @@
 
 <p align="center">A little less noise. A little more together.</p>
 
-<p align="center"><a href="https://omega.naridon.com">Website</a> · <a href="https://github.com/MHASK/Omega/releases/latest">Download for Mac</a> · <a href="#connect-a-local-assistant">Connect an assistant</a></p>
+<p align="center"><a href="https://omega.naridon.com">Website</a> · <a href="https://github.com/MHASK/Omega/releases/latest">Download for Mac</a> · <a href="Relay/README.md#run-with-https">Self-host</a> · <a href="#connect-a-local-assistant">Connect an assistant</a></p>
 
-A calm, local Markdown notes and tasks app for macOS. No account, no cloud workspace, no built-in AI.
+A calm, open-source Markdown notes and tasks app for macOS, with live collaboration and a self-hostable relay. Files stay on your Mac and in Git. Use your existing GitHub or GitLab CLI login; no Omega account is needed.
 
 **macOS 14 or later · Apple silicon · Apache 2.0**
 
@@ -23,6 +23,7 @@ A calm, local Markdown notes and tasks app for macOS. No account, no cloud works
 - Manage task statuses and shared pastel labels in Settings (⌘,).
 - Local recovery checkpoints, atomic file saves, persistent undo, and update backups.
 - Optional Git notebooks with existing GitHub/GitLab CLI login.
+- Live collaboration with named cursors and a [self-hosted, memory-only relay](Relay/README.md).
 - Optional local MCP access for tools such as Claude Code and Codex.
 
 ## Writing
