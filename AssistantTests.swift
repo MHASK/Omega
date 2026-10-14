@@ -20,6 +20,20 @@ import Foundation
             return response!["structuredContent"] as? [String: Any] ?? [:]
         }
         func note(_ result: [String: Any]) -> (String, String) { (result["path"] as! String, result["revision"] as! String) }
+        let explicitStatus = "<!-- folio:tasks -->\n# Outside edits\n\n## Goals\n- [ ] Goal\n\n## To do\n- [ ] Parent\n  <!-- folio:task {\"id\":\"parent\",\"status\":\"Done\",\"description\":\"Keep **details**\",\"labels\":[\"Writing\"]} -->\n  - [ ] Child\n    <!-- folio:task {\"id\":\"child\",\"status\":\"In progress\"} -->\n\n## In progress\n\n## Done\n"
+        let explicit = try TaskDocument(markdown: explicitStatus)
+        precondition(explicit.tasks[0].status == "Done" && explicit.tasks[0].details.status == nil)
+        precondition(explicit.tasks[0].details.description == "Keep **details**" && explicit.tasks[0].details.labels == ["Writing"])
+        precondition(explicit.tasks[0].subtasks[0].details.status == "In progress")
+        let normalizedExplicit = try TaskDocument(markdown: explicit.markdown)
+        precondition(normalizedExplicit.tasks[0].status == "Done" && normalizedExplicit.tasks[0].details.id == "parent")
+        let (explicitPath, explicitRevision) = note(call("create_note", ["folder": root.path, "name": "Outside edits", "markdown": explicitStatus]))
+        _ = call("update_note", ["path": explicitPath, "expected_revision": explicitRevision, "markdown": explicitStatus.replacingOccurrences(of: "\"status\":\"Done\"", with: "\"status\":\"Unknown\"")], fails: true)
+        let unchangedExplicit = try String(contentsOfFile: explicitPath, encoding: .utf8)
+        precondition(unchangedExplicit == explicitStatus)
+        _ = call("create_note", ["folder": root.path, "name": "Invalid tasks", "markdown": explicitStatus + "Unexpected Markdown\n"], fails: true)
+        precondition(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Invalid tasks.md").path))
+        print("PASS: outside main-task statuses normalize without losing details; malformed MCP task writes leave files untouched")
         let (file, first) = note(call("create_note", ["folder": root.path, "name": "Café 日本語", "markdown": "# Hello 👋\n\nShared thoughts\n"]))
         _ = call("create_note", ["folder": root.path, "name": "Café 日本語", "markdown": "overwrite"], fails: true)
         _ = call("create_note", ["folder": root.path, "name": "../escape", "markdown": "bad"], fails: true)

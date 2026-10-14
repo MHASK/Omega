@@ -34,7 +34,9 @@ export function parseTasks(text){
   if(meta){
    if(!target||metadataSeen||meta[1].length!==(target.depth+1)*2)return null;
    let details;try{details=JSON.parse(meta[2]);}catch{return null;}
-   if(!validDetails(details,target.depth>0)||details.id&&ids.has(details.id))return null;
+   // Outside editors may write an explicit status on a main task too.
+   // Resolve it after all section names are known; goals still have no status.
+   if(!validDetails(details,target.depth>0||section!=='Goals')||details.id&&ids.has(details.id))return null;
    if(details.id){ids.add(details.id);target.item.id=details.id;}
    target.item.details=details;metadataSeen=true;continue;
   }
@@ -50,6 +52,10 @@ export function parseTasks(text){
  if(!model.statuses.includes(model.completed))model.statuses.push(model.completed);
  if(model.statuses.length>12||!titleSeen)return null;
  for(const {item,parent} of walkTasks(model))if(parent&&item.details.status&&!model.statuses.includes(item.details.status))return null;
+ for(const item of model.tasks)if(item.details.status!==undefined){
+  const status=model.statuses.indexOf(item.details.status);if(status<0)return null;
+  item.status=status;item.done=item.details.status===model.completed;delete item.details.status;
+ }
  return model;
 }
 export function subtaskStatus(model,child){return model.statuses.indexOf(child.details?.status||(child.done?model.completed:model.statuses.find(s=>s!==model.completed)||model.completed));}

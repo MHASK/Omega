@@ -19,7 +19,7 @@ import {writingColors} from './writing-schema.js';
 const $ = id => document.getElementById(id);
 const send = (type, data = {}) => window.webkit?.messageHandlers.folio.postMessage({ type, ...data });
 let taskMode = false, live = null;
-let editor, identity = '', original = '', initialDoc, sourceMode = false, forcedSource = false, loading = false, readOnly = false;
+let editor, identity = '', original = '', initialDoc, sourceMode = false, forcedSource = false, requestedSource = false, loading = false, readOnly = false;
 let slashRange = null, dismissedSlash = null, entryCallback, lastScale = 1, toastTimer;
 const scroller = $('scroller'), bubble = $('bubble'), slash = $('slash'), tableTools = $('table-tools'), source = $('source');
 let externalHighlightTimer;
@@ -354,7 +354,7 @@ window.folio={
  load(config){
   if(live){live.destroy();live=null;send('liveStopped');}
   undoHistory.reset();writing.reset();blocks.reset();
-  clearMatch();loading=true;identity=config.id;original=config.text||'';readOnly=!!config.reading;hideMenus();$('entry').hidden=true;$('find').hidden=true;
+  clearMatch();loading=true;identity=config.id;original=config.text||'';readOnly=!!config.reading;requestedSource=!!config.source;hideMenus();$('entry').hidden=true;$('find').hidden=true;
   if(!config.source&&parseTasks(original)){taskMode=true;sourceMode=false;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;taskPage.load(original,{identity});this.configure(config);loading=false;cursor();return;}
   taskMode=false;taskPage.element.hidden=true;
   forcedSource=needsSource(original);sourceMode=!!config.source||forcedSource;
@@ -433,6 +433,9 @@ window.folio={
   if(live?.kind==='rich')return false;
   if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
   if(sourceMode&&!live){
+   if(forcedSource&&!requestedSource&&parseTasks(config.text)){
+    this.load({id:identity,text:config.text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});emitChange();return true;
+   }
    const previous=source.value,start=source.selectionStart,end=source.selectionEnd,scroll=source.scrollTop;
    // A textarea has UTF-16 positions, just like the prefix/suffix comparison.
    let prefix=0;while(prefix<previous.length&&prefix<config.text.length&&previous[prefix]===config.text[prefix])prefix++;

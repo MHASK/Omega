@@ -230,7 +230,9 @@ struct TaskDocument: Codable {
             guard spaces % 2 == 0, depth <= 33 else { throw TaskPageError("Invalid task indentation.") }
             if row.hasPrefix("<!-- folio:task ") {
                 guard row.hasSuffix(" -->"), !metadataSeen, depth == (goalIndex == nil ? path.count : 1), depth > 0 else { throw TaskPageError("Invalid task detail placement.") }
-                let details = try TaskDetails.decode(String(row.dropFirst(16).dropLast(4)), child: depth > 1)
+                // Accept a main task's explicit status from outside editors.
+                // Canonical Markdown continues to store it in the section.
+                let details = try TaskDetails.decode(String(row.dropFirst(16).dropLast(4)), child: depth > 1 || goalIndex == nil)
                 if let goalIndex { goals[goalIndex].details = details }
                 else if path.count == 1 { tasks[path[0]].details = details }
                 else { tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { $0.details = details } }
@@ -257,7 +259,13 @@ struct TaskDocument: Codable {
         var ids = Set<String>()
         for ref in references {
             if let id = ref.details.id, !ids.insert(id).inserted { throw TaskPageError("Duplicate task identity.") }
-            if let status = ref.details.status, !statuses.contains(status) { throw TaskPageError("Unknown subtask status.") }
+            if let status = ref.details.status, !statuses.contains(status) { throw TaskPageError("Unknown task status.") }
+        }
+        for index in tasks.indices {
+            if let status = tasks[index].details.status {
+                tasks[index].status = status
+                tasks[index].details.status = nil
+            }
         }
     }
     func status(of child: TaskCheckItem) -> String { child.details.status ?? (child.completed ? completedStatus : (statuses.first(where: { $0 != completedStatus }) ?? completedStatus)) }

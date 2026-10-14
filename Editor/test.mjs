@@ -196,6 +196,12 @@ const normalized=m=>JSON.parse(JSON.stringify(m,(key,value)=>key==='id'?undefine
 assert.deepEqual(normalized(parseTasks(serializeTasks(model))),normalized(model));
 assert.equal(parseTasks(tasksSource+'\nUnrecognized content must survive.\n'),null);
 assert.equal(parseTasks('# Ordinary checklist\n\n- [ ] Keep as note'),null);
+const explicitStatus=taskMarker+'\n# Outside edits\n\n## Goals\n- [ ] Goal\n\n## To do\n- [ ] Parent\n  <!-- folio:task {"id":"parent","status":"Done","description":"Keep **details**","labels":["Writing"]} -->\n  - [ ] Child\n    <!-- folio:task {"id":"child","status":"In progress"} -->\n\n## In progress\n\n## Done\n';
+const explicitModel=parseTasks(explicitStatus);assert(explicitModel);assert.equal(explicitModel.tasks[0].status,2);assert.equal(explicitModel.tasks[0].done,true);assert.equal(explicitModel.tasks[0].details.status,undefined);assert.equal(explicitModel.tasks[0].details.description,'Keep **details**');assert.deepEqual(explicitModel.tasks[0].details.labels,['Writing']);assert.equal(explicitModel.tasks[0].children[0].details.status,'In progress');
+const canonicalExplicit=serializeTasks(explicitModel);assert.deepEqual(normalized(parseTasks(canonicalExplicit)),normalized(explicitModel));assert(canonicalExplicit.indexOf('- [x] Parent')>canonicalExplicit.indexOf('## Done'));
+assert.equal(parseTasks(explicitStatus.replace('"status":"Done"','"status":"Unknown"')),null);
+assert.equal(parseTasks(explicitStatus.replace('- [ ] Goal','- [ ] Goal\n  <!-- folio:task {"status":"Done"} -->')),null);
+console.log('PASS: explicit main-task statuses from outside editors preserve details/children and normalize into the correct section; invalid statuses remain protected.');
 let taskChanges=0;const taskDOM=document.createElement('div');document.body.append(taskDOM);
 const taskView=new TaskPage(taskDOM,()=>taskChanges++);assert(taskView.load(tasksSource));assert.equal(taskView.raw,tasksSource);assert.equal(taskChanges,0);
 taskDOM.querySelector('[aria-label="Board view"]').click();assert.equal(taskChanges,0);assert(taskDOM.querySelector('.board'));

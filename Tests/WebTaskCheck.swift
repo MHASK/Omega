@@ -238,6 +238,25 @@ final class ResourceFiles: NSObject, WKURLSchemeHandler {
             try await load(text,"project-ring-small")
             _=try await js("document.querySelector('[aria-label=\"List view\"]').click();true");try await settle()
             try await assertJS("(()=>{let r=document.querySelector('.tasks-page-progress').getBoundingClientRect(),t=document.querySelector('.tasks-title').getBoundingClientRect(),h=document.querySelector('.tasks-heading').getBoundingClientRect();return r.width===r.height&&r.left>=0&&r.right<t.left&&t.right<=innerWidth&&h.right<=innerWidth})()", "title and project ring fit a small window at high zoom")
+            let outsideTask = "<!-- folio:tasks -->\n# Outside edit\n\n## To do\n- [ ] Parent\n  <!-- folio:task {\"id\":\"outside-parent\",\"status\":\"Done\",\"description\":\"Keep these details\",\"labels\":[\"Writing\"]} -->\n  - [ ] Child\n    <!-- folio:task {\"id\":\"outside-child\",\"status\":\"In progress\"} -->\n\n## In progress\n\n## Done\n"
+            view.frame.size=NSSize(width:1100,height:900);view.pageZoom=1
+            try await load(outsideTask,"outside-task")
+            try await assertJS("document.getElementById('source').hidden&&!document.getElementById('task-page').hidden&&!!document.querySelector('.tasks-title')", "outside main-task status opens in task view without rewriting the file")
+            precondition(current == outsideTask)
+            let invalidTask = outsideTask + "Unsupported extra content\n"
+            try await load(invalidTask,"task-fallback")
+            try await assertJS("!document.getElementById('source').hidden", "unrecognized task content remains intact in source fallback")
+            let repairData = try JSONSerialization.data(withJSONObject:["id":id,"base":invalidTask,"text":outsideTask])
+            _ = try await js("window.folio.applyExternal(\(String(decoding:repairData,as:UTF8.self)))")
+            try await settle()
+            try await assertJS("document.getElementById('source').hidden&&!document.getElementById('task-page').hidden", "repairing outside task edits automatically restores the task view")
+            _ = try await js("window.folio.command('source');true")
+            try await assertJS("!document.getElementById('source').hidden", "manual Markdown view can still be selected")
+            let anotherEdit = outsideTask.replacingOccurrences(of:"# Outside edit",with:"# Another outside edit")
+            let editData = try JSONSerialization.data(withJSONObject:["id":id,"base":outsideTask,"text":anotherEdit])
+            _ = try await js("window.folio.applyExternal(\(String(decoding:editData,as:UTF8.self)))")
+            try await settle()
+            try await assertJS("!document.getElementById('source').hidden&&document.getElementById('source').value.includes('Another outside edit')", "outside edits preserve an intentionally selected Markdown view")
             print("All task detail, composer, persistence and responsive checks passed.")
         } catch {print("FAIL",error);failed=true}
         done=true;try? FileManager.default.removeItem(at:root)
