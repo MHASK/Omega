@@ -78,7 +78,7 @@ const commandList = [
  ['h3','Heading 3','A small heading',c=>c.setHeading({level:3})],
  ['bullet','Bullet list','A simple list',c=>c.toggleBulletList()],
  ['numbered','Numbered list','One thing after another',c=>c.toggleOrderedList()],
- ['checklist','Checklist','Keep track of the little things',c=>c.toggleTaskList()],
+ ['checklist','Task list','Simple checklist · gathered in folder tasks',c=>c.toggleTaskList()],
  ['table','Table','Organize things into rows and columns',c=>c.insertTable({rows:3,cols:3,withHeaderRow:true})],
  ['quote','Quote','Give a thought some space',c=>c.toggleBlockquote()],
  ['code','Code block','Code with syntax highlighting',c=>c.toggleCodeBlock()],
@@ -433,7 +433,7 @@ window.folio={
   if(live?.kind==='rich')return false;
   if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
   if(sourceMode&&!live){
-   if(forcedSource&&!requestedSource&&parseTasks(config.text)){
+   if(forcedSource&&!requestedSource&&(parseTasks(config.text)||!needsSource(config.text))){
     this.load({id:identity,text:config.text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});emitChange();return true;
    }
    const previous=source.value,start=source.selectionStart,end=source.selectionEnd,scroll=source.scrollTop;

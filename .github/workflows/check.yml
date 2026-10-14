@@ -26,6 +26,7 @@ jobs:
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --mcp-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'
       - run: zsh Tests/check-notebook-migration.sh
+      - run: zsh Tests/check-checklists.sh
       - run: xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"
       - run: '"$RUNNER_TEMP/GitSyncCheck"'
       - run: ./Tests/check-git-app.sh

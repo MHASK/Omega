@@ -6,7 +6,7 @@ import {quietButton,positionPopover} from './writing-tools.js';
 export function blockAt(editor,pos){
  const $pos=editor.state.doc.resolve(Math.min(pos,editor.state.doc.content.size));if(!$pos.depth)return null;
  let depth=1;for(let d=$pos.depth;d>0;d--)if(['listItem','taskItem'].includes($pos.node(d).type.name)){depth=d;break;}
- const node=$pos.node(depth);if(node.type.name==='commentRecord')return null;
+ const node=$pos.node(depth);if(['commentRecord','sourceComment','inlineSourceComment'].includes(node.type.name))return null;
  return {from:$pos.before(depth),to:$pos.after(depth),node,parent:$pos.node(depth-1),index:$pos.index(depth-1),depth};
 }
 export function duplicateBlock(editor,block){
@@ -110,7 +110,7 @@ export class BlockTools {
   if(d.x<bounds.left||d.x>bounds.right||d.y<bounds.top||d.y>bounds.bottom)return;
   const candidates=[];
   this.editor.state.doc.descendants((node,pos,parent)=>{
-   if(node.type.name==='commentRecord')return false;
+   if(['commentRecord','sourceComment','inlineSourceComment'].includes(node.type.name))return false;
    if(parent!==this.editor.state.doc&&!(isItem(d.node)&&isItem(node)&&node.type===d.node.type))return true;
    const r=this.editor.view.nodeDOM(pos)?.getBoundingClientRect();if(!r||!r.height)return true;
    // Top-level blocks remain whole, including tables and nested lists.

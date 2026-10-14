@@ -267,6 +267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         catch { notebook.status = "Assistant connection unavailable: " + error.localizedDescription }
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if notebook.checklistFolder != nil {
+            let editorActions: [Selector] = [#selector(rename), #selector(sourceMode), #selector(findInNote), #selector(reading), #selector(bold), #selector(italic), #selector(heading), #selector(checklist), #selector(underline), #selector(addComment), #selector(undoEdit), #selector(redoEdit), #selector(writingLarger), #selector(writingSmaller), #selector(writingReset)]
+            if editorActions.contains(where: { $0 == item.action }) { return false }
+        }
         guard notebook.showingSettings else { return true }
         let noteActions: [Selector] = [#selector(newNote), #selector(newTaskPage), #selector(newNotebook), #selector(newFolder), #selector(openFile), #selector(openFolder), #selector(rename), #selector(sourceMode), #selector(findInNote), #selector(sidebar), #selector(reading), #selector(bold), #selector(italic), #selector(heading), #selector(checklist), #selector(restoreDeleted)]
         return !noteActions.contains(where: { $0 == item.action })

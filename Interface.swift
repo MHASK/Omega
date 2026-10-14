@@ -145,7 +145,7 @@ struct FolioView: View {
             let compact = geometry.size.width < minimumSidebar + minimumDocument
             let docked = notebook.sidebar && !compact
             // Task controls occupy the document's top edge when the window controls are in the sidebar.
-            let edgeTaskHeader = docked && notebook.selected != nil && notebook.text.hasPrefix(TaskDocument.marker)
+            let edgeTaskHeader = docked && notebook.checklistFolder == nil && notebook.selected != nil && notebook.text.hasPrefix(TaskDocument.marker)
             let width = compact
                 ? min(max(220, CGFloat(notebook.sidebarWidth) * scale), max(180, geometry.size.width - 32))
                 : min(CGFloat(notebook.sidebarWidth) * scale, max(minimumSidebar, geometry.size.width - minimumDocument))
@@ -159,6 +159,7 @@ struct FolioView: View {
                         RichEditor(notebook: notebook)
                             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                             .overlay(alignment: .bottom) { ScrollEdgeFade(surface: Ink.paper, height: 24 * scale) }
+                            .accessibilityHidden(notebook.checklistFolder != nil)
                     } else {
                         VStack(alignment: .leading, spacing: 18 * scale) {
                             Text(notebook.loading ? "Opening folder…" : "No note selected")
@@ -172,7 +173,9 @@ struct FolioView: View {
                             .padding(.top, 6 * scale).padding(.horizontal, min(50 * scale, documentWidth * 0.08))
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
-                    footer(width: documentWidth)
+                    footer(width: documentWidth).accessibilityHidden(notebook.checklistFolder != nil)
+                }.overlay {
+                    if let folder = notebook.checklistFolder { FolderChecklistView(folder: folder, notebook: notebook).id(folder) }
                 }.frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                     .padding(.top, edgeTaskHeader ? 0 : headerHeight).background(Color(nsColor: Ink.paper))
             }
@@ -200,7 +203,7 @@ struct FolioView: View {
                 HStack(spacing: 0) {
                     sidebarToolbar.frame(width: docked || (compact && notebook.sidebarOverlay) ? width : min(240 * toolbarScale, max(150, geometry.size.width - 142 * toolbarScale)))
                     WindowDragRegion().frame(maxWidth: .infinity).allowsHitTesting(!edgeTaskHeader)
-                    if !edgeTaskHeader && notebook.selected != nil && !(compact && notebook.sidebarOverlay) {
+                    if !edgeTaskHeader && notebook.checklistFolder == nil && notebook.selected != nil && !(compact && notebook.sidebarOverlay) {
                         DocumentToolbar(notebook: notebook)
                             .padding(.trailing, 12 * toolbarScale)
                             .padding(.top, max(0, 19 - 12 * toolbarScale))
@@ -437,7 +440,10 @@ struct NotebookSection: View {
                         Spacer(minLength: 0)
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel(folder.lastPathComponent + " notebook")
+                FolderTasksButton(folder: folder, notebook: notebook, scale: scale)
                 Menu {
+                    Button("View tasks") { notebook.showChecklist(in: folder) }
+                    Divider()
                     Button("New note") { notebook.newNote(in: folder) }
                     Button("New task page") { notebook.newTaskPage(in: folder) }
                     Button("New folder…") { notebook.newFolder(in: folder) }
@@ -477,7 +483,7 @@ struct NoteRow: View {
     @State private var dropTarget = false
     var scale: CGFloat { CGFloat(notebook.zoom) }
     var rootTint: Color { Color(nsColor: notebook.tint(for: rootFolder).color) }
-    var selected: Bool { notebook.selected == entry.url }
+    var selected: Bool { notebook.checklistFolder == entry.url || (notebook.checklistFolder == nil && notebook.selected == entry.url) }
     var targeted: Bool { entry.isFolder && (dropTarget || notebook.dragDestination == entry.url) }
     func activate() {
         if entry.isFolder {
@@ -506,7 +512,10 @@ struct NoteRow: View {
                     .accessibilityElement(children: .ignore).accessibilityLabel(entry.name)
                     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton).accessibilityAction { activate() }
                 if entry.isFolder {
+                    FolderTasksButton(folder: entry.url, notebook: notebook, scale: scale).opacity(hovered || notebook.checklistFolder == entry.url ? 1 : 0.001)
                     Menu {
+                        Button("View tasks") { notebook.showChecklist(in: entry.url) }
+                        Divider()
                         Button("New note") { notebook.newNote(in: entry.url) }
                         Button("New task page") { notebook.newTaskPage(in: entry.url) }
                         Button("New folder…") { notebook.newFolder(in: entry.url) }
@@ -556,6 +565,8 @@ struct ItemContextMenu: View {
     @ObservedObject var notebook: Notebook
     var body: some View {
         if isFolder {
+            Button("View tasks") { notebook.showChecklist(in: url) }
+            Divider()
             Button("New note") { notebook.newNote(in: url) }
             Button("New task page") { notebook.newTaskPage(in: url) }
             Button("New folder…") { notebook.newFolder(in: url) }

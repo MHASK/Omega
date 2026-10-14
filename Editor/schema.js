@@ -11,6 +11,7 @@ import { common, createLowlight } from 'lowlight';
 import katex from 'katex';
 import { PageLink } from './page-links.js';
 import {TextColor,Highlight,Underline,CommentAnchor,CommentRecord,withoutWritingMarkup} from './writing-schema.js';
+import {SourceComment,InlineSourceComment,withoutSourceComments} from './source-comments.js';
 
 // Empty notes get an editable outline, while the editor retains the original
 // empty file until the user actually writes. Placeholders are never saved.
@@ -44,14 +45,14 @@ export function visualMarkdown(text) {
   const code=[];
   text.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*(?:\n|$)|`+[^`\n]*`+/gm,(match,_,offset)=>{code.push([offset,offset+match.length]);return match;});
   return text.replace(/<([A-Za-z][\w]*(?:[ \t]+[\w]+)*)>/g,(match,label,offset)=>{
-    if(code.some(([start,end])=>offset>=start&&offset<end)||htmlTags.has(label.split(/\s/)[0].toLowerCase())||text.toLowerCase().includes('</'+label.toLowerCase()+'>'))return match;
+    if(code.some(([start,end])=>offset>=start&&offset<end)||text.lastIndexOf('<!--',offset)>text.lastIndexOf('-->',offset)||htmlTags.has(label.split(/\s/)[0].toLowerCase())||text.toLowerCase().includes('</'+label.toLowerCase()+'>'))return match;
     return '&lt;'+label+'&gt;';
   });
 }
 
 // Extended dialects open losslessly in source mode; never silently discard them.
 export function needsSource(markdown) {
-  const withoutCode = withoutWritingMarkup(visualMarkdown(markdown)).replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm, '').replace(/`[^`\n]*`/g, '');
+  const withoutCode = withoutWritingMarkup(withoutSourceComments(visualMarkdown(markdown))).replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm, '').replace(/`[^`\n]*`/g, '');
   return /^ {0,3}(?:`{3,}|~{3,})[ \t]*database(?:\s|$)/mi.test(markdown)
     || /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\n|$)/.test(markdown)
     || /<!--|<\/?[a-z][\w-]*(?:\s[^>]*|\s*\/?)>/i.test(withoutCode)
@@ -134,7 +135,7 @@ function mathNode(block) {
 
 export function extensions({nativeHistory = false} = {}) {
   return [
-    StarterKit.configure({ undoRedo: nativeHistory ? false : {}, codeBlock: false, underline: false, trailingNode: false, link: false }), PageLink, TextColor, Highlight, Underline, CommentAnchor, CommentRecord,
+    StarterKit.configure({ undoRedo: nativeHistory ? false : {}, codeBlock: false, underline: false, trailingNode: false, link: false }), PageLink, TextColor, Highlight, Underline, CommentAnchor, CommentRecord, SourceComment, InlineSourceComment,
     Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
     Table.configure({ resizable: true, lastColumnResizable: false, cellMinWidth: 90 }), TableRow,
     TableHeader.extend({ content: 'paragraph' }), TableCell.extend({ content: 'paragraph' }),

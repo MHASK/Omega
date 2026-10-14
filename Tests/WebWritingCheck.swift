@@ -93,6 +93,31 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
     }
     func run() async {
         do {
+            let markers = "# Now\n\n<!-- timeline:start -->\n## Timeline\n\n- **Latest** update\n- [ ] Follow up\n\n<!-- timeline:end -->\n\nA quiet ending.\n"
+            try await load(0, markers)
+            try check(try await js(0,"document.querySelector('#source').hidden && document.querySelectorAll('[data-source-comment]').length === 2") as! Bool,"assistant timeline markers keep the note visual")
+            try check(try await text(0) == markers,"opening keeps the exact original Markdown")
+            try await append(0," Another thought.")
+            let editedMarkers = try await text(0)
+            try check(editedMarkers.contains("<!-- timeline:start -->") && editedMarkers.contains("<!-- timeline:end -->") && editedMarkers.contains("Another thought."),"editing preserves hidden assistant markers")
+            let nextMarkers = editedMarkers.replacingOccurrences(of:"**Latest** update",with:"**Latest** Claude update")
+            try check(try await js(0,"window.folio.replaceForAssistant(\(json(["id":"live","expected":editedMarkers,"text":nextMarkers,"activity":true])))") as! Bool,"assistant updates patch the visual note directly")
+            try check(try await js(0,"document.querySelector('#source').hidden && document.querySelector('.tiptap').textContent.includes('Claude update')") as! Bool,"incoming changes appear without source fallback")
+            try await screenshot("assistant-markers-visual")
+            let unsupported = "<details>Extended Markdown</details>"
+            try await load(0,unsupported)
+            try check(try await js(0,"window.folio.replaceForAssistant(\(json(["id":"live","expected":unsupported,"text":markers])))") as! Bool,"automatic source fallback recovers after a supported outside edit")
+            try check(try await js(0,"document.querySelector('#source').hidden") as! Bool,"supported note returns to visual editing")
+            _ = try await js(0,"window.folio.command('source');true")
+            try check(try await js(0,"window.folio.replaceForAssistant(\(json(["id":"live","expected":markers,"text":markers+"More text."])))") as! Bool,"explicit source mode receives outside edits")
+            try check(try await js(0,"!document.querySelector('#source').hidden") as! Bool,"explicit source choice stays in source mode")
+            try await load(0,markers);try await load(1,markers)
+            try await join(0);try await join(1)
+            try await append(0," From one.");try await append(1," From two.")
+            let paired = try await text(0)
+            try check(try await text(1) == paired && paired.contains("From one.") && paired.contains("From two.") && paired.contains("<!-- timeline:start -->"),"two live editors preserve assistant markers and both authors’ changes")
+            for i in 0..<2 { _ = try await js(i,"window.folio.liveStop();true") }
+            state = ""; checkpoints = [:]
             let note="# A little room to write\n\nGood ideas deserve a quiet place.\n\n## The next chapter\n\n- Explore the possibilities\n- Share a thought with the team\n\nA new paragraph.\n"
             try await load(0,note);try await load(1,note)
             let bodySize=try await js(0,"getComputedStyle(document.querySelector('#editor')).fontSize") as! String

@@ -21,7 +21,7 @@ editor.commands.setTextSelection(cellPosition);
 assert(editor.commands.addRowAfter());assert(editor.commands.addColumnAfter());
 const table=editor.getJSON().content.find(n=>n.type==='table');assert.equal(table.content.length,4);assert.equal(table.content[0].content.length,3);
 editor.commands.undo();assert.equal(editor.getJSON().content.find(n=>n.type==='table').content[0].content.length,2);
-for(const example of ['---\ntitle: Metadata\n---\n\nText','<!-- keep me -->\n\nHello','Text[^1]\n\n[^1]: Footnote','<details><summary>Test</summary>Text</details>'])assert(needsSource(example));
+for(const example of ['---\ntitle: Metadata\n---\n\nText','Text[^1]\n\n[^1]: Footnote','<details><summary>Test</summary>Text</details>'])assert(needsSource(example));
 for(const example of ['# Heading\n\nNormal text','```html\n<div>code</div>\n```','A `<div>` example',source])assert(!needsSource(example),example);
 editor.destroy();console.log('PASS: headings, marks, links, nested lists, tasks, code, tables, alignment, escaped pipes, local images, math, Unicode, save/reopen, table mutations, undo, and lossless source fallback.');
 
@@ -451,3 +451,6 @@ console.log('PASS: block moves preserve nested content and formatting, remove em
 
 import {runExternalTests} from './external-test.mjs';
 runExternalTests();
+
+import {runSourceCommentTests} from './source-comments-test.mjs';
+runSourceCommentTests();

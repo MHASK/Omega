@@ -54,6 +54,7 @@ final class Notebook: ObservableObject {
     @Published var trees: [URL: [NoteEntry]] = [:]
     @Published var collapsedNotebooks: Set<String> = []
     @Published var creationFolder: URL?
+    @Published var checklistFolder: URL?
     @Published private(set) var notebookTints = UserDefaults.standard.dictionary(forKey: "notebookColors") as? [String: String] ?? [:]
     func tint(for url: URL) -> NotebookTint { NotebookTint(rawValue: notebookTints[url.path] ?? "") ?? .sky }
     func setTint(_ tint: NotebookTint?, for url: URL) {
@@ -424,6 +425,7 @@ final class Notebook: ObservableObject {
     }
 
     private func performSelect(_ url: URL) {
+        checklistFolder = nil
         searchReveal = nil
         if url == selected { searching = false; query = ""; sidebarOverlay = false; return }
         guard save() else { return }
