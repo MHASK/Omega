@@ -12,3 +12,5 @@ Editor/.folio-tests.cjs
 .env*
 Relay/node_modules/
 Relay/data/
+
+Website/dist/

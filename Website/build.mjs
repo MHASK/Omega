@@ -1,0 +1,16 @@
+import {mkdir,copyFile,readFile,writeFile,rm,cp} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=path.dirname(fileURLToPath(import.meta.url)),out=path.join(root,'dist');
+await rm(out,{recursive:true,force:true});
+await mkdir(path.join(out,'assets'),{recursive:true});
+await mkdir(path.join(out,'preview'),{recursive:true});
+for(const name of ['index.html','site.css','product.css','site.js','robots.txt','sitemap.xml','sky.svg'])await copyFile(path.join(root,name),path.join(out,name));
+await copyFile(path.join(root,'../Omega-Icon.png'),path.join(out,'assets/omega.png'));
+for(const name of ['editor.js','editor.css','fa-solid-900.ttf','Third-Party-Notices.txt'])await copyFile(path.join(root,'../Resources',name),path.join(out,'preview',name));
+await cp(path.join(root,'../Resources/fonts'),path.join(out,'preview/fonts'),{recursive:true});
+let html=await readFile(path.join(root,'../Resources/index.html'),'utf8');
+html=html.replace(/folio:\/\/app\//g,'./').replace(/script-src folio:/,"script-src 'self'").replace(/style-src folio:/,"style-src 'self'").replace(/img-src folio: https: http:/,"img-src 'self' data:").replace(/font-src folio:/,"font-src 'self'").replace('</head>','<link rel="stylesheet" href="./preview.css"></head>').replace('</body>','<script src="./preview.js"></script></body>');
+await writeFile(path.join(out,'preview/index.html'),html);
+for(const name of ['preview.js','preview.css'])await copyFile(path.join(root,name),path.join(out,'preview',name));
+console.log(`Built ${out}`);

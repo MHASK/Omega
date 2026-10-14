@@ -1,0 +1,26 @@
+omega.naridon.com {
+    request_body {
+        max_size 6MB
+    }
+
+    # The live relay stays a separate, memory-only service.
+    @relay path /live /health
+    handle @relay {
+        reverse_proxy 127.0.0.1:8787 {
+            stream_close_delay 5m
+        }
+    }
+
+    handle {
+        root * /srv/omega-website/current
+        encode zstd gzip
+        header {
+            X-Content-Type-Options nosniff
+            Referrer-Policy no-referrer
+            Permissions-Policy "camera=(), microphone=(), geolocation=()"
+            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src https://api.github.com; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; object-src 'none'"
+            Cache-Control "public, max-age=300"
+        }
+        file_server
+    }
+}

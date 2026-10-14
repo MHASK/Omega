@@ -1,4 +1,12 @@
-# Omega
+<p align="center">
+  <a href="https://omega.naridon.com"><img src="Omega-Icon.png" width="100" height="100" alt="Omega logo"></a>
+</p>
+
+<h1 align="center">Omega</h1>
+
+<p align="center">A little less noise. A little more together.</p>
+
+<p align="center"><a href="https://omega.naridon.com">Website</a> · <a href="https://github.com/MHASK/Omega/releases/latest">Download for Mac</a> · <a href="#connect-a-local-assistant">Connect an assistant</a></p>
 
 A calm, local Markdown notes and tasks app for macOS. No account, no cloud workspace, no built-in AI.
 
