@@ -58,13 +58,20 @@ import SwiftUI
         let savedTasks = try TaskDocument(markdown: String(contentsOf: taskURL, encoding: .utf8))
         try require(savedTasks.status(of: savedTasks.tasks[0].subtasks[0]) == savedTasks.completedStatus, "task-page children retain valid completion metadata")
         notebook.appearance = "dark"
-        let host = NSHostingView(rootView: FolderChecklistView(folder: root, notebook: notebook).preferredColorScheme(.dark))
+        notebook.sidebar = true; notebook.zoom = 1; notebook.checklistFolder = root
+        let host = NSHostingView(rootView: FolioView(notebook: notebook).preferredColorScheme(.dark))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 730), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host; window.orderFront(nil)
         try await Task.sleep(for: .seconds(1)); host.layoutSubtreeIfNeeded()
         if let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])?.write(to: root.deletingLastPathComponent().appendingPathComponent("folder-checklists.png"))
+        }
+        window.setContentSize(NSSize(width: 420, height: 730))
+        try await Task.sleep(for: .milliseconds(200)); host.layoutSubtreeIfNeeded()
+        if let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to: root.deletingLastPathComponent().appendingPathComponent("folder-checklists-narrow.png"))
         }
         try require(try fm.contentsOfDirectory(atPath: root.path).sorted() == ["A thoughtful launch.md", "Archived.md", "Projects", "Work.md"], "the rollup creates no duplicate task file")
         window.orderOut(nil)

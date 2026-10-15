@@ -24,5 +24,5 @@ mkdir -p "$OMEGA_CHECKLIST_CHECK/fixture"
 
 if [[ -n "${1:-}" ]]; then
   mkdir -p "$1"
-  cp "$OMEGA_CHECKLIST_CHECK/fixture/folder-checklists.png" "$1/folder-checklists.png"
+  cp "$OMEGA_CHECKLIST_CHECK/fixture/"*.png "$1/"
 fi

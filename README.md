@@ -19,9 +19,10 @@ A calm, open-source Markdown notes and tasks app for macOS, with live collaborat
 - Edit ordinary Markdown files in your own folders. Assistant HTML comment markers stay hidden and are preserved when editing. Tables, images, math, slash commands, page links, and a selection toolbar.
 - Organize notebooks with drag-and-drop ordering, folders, favorites, and archives.
 - Find notes with ⌘K, then jump to the matching passage. Open Archive from the icon beside ⌘K in the sidebar footer.
-- In notes, type `/task` for a simple checklist. Click the checklist icon beside a notebook or right-click a folder → **View tasks** for a live list grouped by source note. Includes subfolders and existing task pages; excludes archived notes and goals. Completing an item updates its original file, with no duplicate task document.
+- In notes, type `/task` for a simple checklist. Click the checklist icon beside a notebook or right-click a folder → **View tasks** for a live list grouped by source note. A full-width header shows overall progress and Open / Done / All filters; source groups collapse individually. Includes subfolders and existing task pages; excludes archived notes and goals. Completing an item updates its original file, with no duplicate task document.
 - Simple task lists and boards, nested subtasks, descriptions, due dates, labels, and linked goals.
 - Manage task statuses and shared pastel labels in Settings (⌘,).
+- Valid status names added by an outside editor are recognized even before they have a section heading. Imported goal status metadata is preserved; goal progress continues to follow linked work or its checkbox.
 - Local recovery checkpoints, atomic file saves, persistent undo, and update backups.
 - Optional Git notebooks with existing GitHub/GitLab CLI login.
 - Live collaboration with named cursors and a [self-hosted, memory-only relay](Relay/README.md).

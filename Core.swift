@@ -230,9 +230,9 @@ struct TaskDocument: Codable {
             guard spaces % 2 == 0, depth <= 33 else { throw TaskPageError("Invalid task indentation.") }
             if row.hasPrefix("<!-- folio:task ") {
                 guard row.hasSuffix(" -->"), !metadataSeen, depth == (goalIndex == nil ? path.count : 1), depth > 0 else { throw TaskPageError("Invalid task detail placement.") }
-                // Accept a main task's explicit status from outside editors.
-                // Canonical Markdown continues to store it in the section.
-                let details = try TaskDetails.decode(String(row.dropFirst(16).dropLast(4)), child: depth > 1 || goalIndex == nil)
+                // Keep valid external metadata on goals too. Goal progress
+                // remains based on linked work or its checkbox, not this field.
+                let details = try TaskDetails.decode(String(row.dropFirst(16).dropLast(4)), child: true)
                 if let goalIndex { goals[goalIndex].details = details }
                 else if path.count == 1 { tasks[path[0]].details = details }
                 else { tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { $0.details = details } }
@@ -255,12 +255,12 @@ struct TaskDocument: Codable {
         guard titleSeen else { throw TaskPageError("Task page needs a title.") }
         if statuses.isEmpty { statuses = TaskPreferences().statuses }
         if !statuses.contains(completedStatus) { statuses.append(completedStatus) }
-        try TaskPreferences(statuses: statuses, completed: completedStatus).validate()
         var ids = Set<String>()
         for ref in references {
             if let id = ref.details.id, !ids.insert(id).inserted { throw TaskPageError("Duplicate task identity.") }
-            if let status = ref.details.status, !statuses.contains(status) { throw TaskPageError("Unknown task status.") }
+            if ref.kind != "goal", let status = ref.details.status, !statuses.contains(status) { statuses.append(status) }
         }
+        try TaskPreferences(statuses: statuses, completed: completedStatus).validate()
         for index in tasks.indices {
             if let status = tasks[index].details.status {
                 tasks[index].status = status
