@@ -42,7 +42,7 @@ import WebKit
         var color = NSColor.gray
         NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance { color = tint.usingColorSpace(.sRGB) ?? .gray }
         let accent = String(format: "#%02x%02x%02x", Int(color.redComponent * 255), Int(color.greenComponent * 255), Int(color.blueComponent * 255))
-        let config: [String: Any] = ["theme": theme, "accent": accent, "labels": notebook.labelColors]
+        let config: [String: Any] = ["theme": theme, "accent": accent, "labels": notebook.labelColors, "taskHeaderInset": notebook.taskHeaderInset]
         let json = String(decoding: AssistantWire.json(config), as: UTF8.self)
         if json != settings { settings = json; webView.evaluateJavaScript("window.folderTasks.configure(\(json))", completionHandler: nil) }
     }
@@ -99,7 +99,7 @@ import WebKit
         let json = String(decoding: AssistantWire.json(payload(next, token: nextToken, warnings: warnings)), as: UTF8.self)
         webView?.evaluateJavaScript("window.folderTasks.load(\(json))") { [weak self] accepted, error in
             guard let self else { return }
-            if accepted as? Bool == true { self.snapshot = next; self.token = nextToken; self.lastWarnings = warnings }
+            if accepted as? Bool == true { self.snapshot = next; self.token = nextToken; self.lastWarnings = warnings; self.notebook?.restoreNavigation(in: self.webView, folder: true) }
             else if let error { self.notice("Could not display folder tasks: " + error.localizedDescription) }
         }
     }
@@ -112,7 +112,7 @@ import WebKit
         switch type {
         case "ready": ready = true; configure(); refresh()
         case "change": save(body)
-        case "back": notebook.checklistFolder = nil
+        case "back": if notebook.canGoBack { notebook.travelNavigation(forward: false) } else if let selected = notebook.selected { notebook.select(selected) }
         case "source":
             guard !saving, let key = body["source"] as? String, let source = snapshot?.sources.first(where: { $0.key == key }) else { return }
             if let id = body["item"] as? String, source.inline == nil,
@@ -133,6 +133,11 @@ import WebKit
                 if let kind = ["task", "goal"].first(where: { fragment.hasPrefix("folio-" + $0 + "-") }) { notebook.selectLinkedItem(target, kind: kind, id: String(fragment.dropFirst(kind.count + 7))) }
                 else { notebook.select(target) }
             }
+        case "references":
+            guard let key = body["source"] as? String, let source = snapshot?.sources.first(where: { $0.key == key }), let request = body["request"] as? String, let links = body["links"] as? [String] else { return }
+            let response: [String: Any] = ["request": request, "rows": LinkedContent.rows(links, from: source.url, notebook: notebook)]
+            let json = String(decoding: AssistantWire.json(response), as: UTF8.self)
+            webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
         case "pages":
             guard let key = body["source"] as? String, let current = snapshot?.sources.first(where: { $0.key == key }) else { return }
             let kind = body["kind"] as? String ?? "all"

@@ -30,6 +30,9 @@ jobs:
       - run: zsh Tests/check-external-edits.sh
       - run: zsh Tests/check-checklists.sh
       - run: zsh Tests/check-folder-tasks.sh
+      - run: zsh Tests/check-navigation-linked.sh
+      - run: xcrun swiftc -parse-as-library Core.swift Recovery.swift UndoHistory.swift Tests/WebDiagramCheck.swift -o "$RUNNER_TEMP/WebDiagramCheck" -framework AppKit -framework WebKit -lsqlite3
+      - run: '"$RUNNER_TEMP/WebDiagramCheck" "$PWD/Resources" "$RUNNER_TEMP/diagrams.png"'
       - run: xcrun swiftc -D FOLDER_TASK_CHECK Core.swift Checklist.swift FolderTasks.swift Tests/FolderTasksCheck.swift -o "$RUNNER_TEMP/FolderTasksCheck"
       - run: '"$RUNNER_TEMP/FolderTasksCheck"'
       - run: xcrun swiftc -parse-as-library Core.swift Recovery.swift UndoHistory.swift Tests/WebTaskCheck.swift -o "$RUNNER_TEMP/WebTaskCheck" -framework AppKit -framework WebKit -lsqlite3

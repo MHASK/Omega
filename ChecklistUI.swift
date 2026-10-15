@@ -98,7 +98,7 @@ struct FolderChecklistView: View {
 
 extension Notebook {
     func showChecklist(in folder: URL) {
-        afterSync {
+        navigate {
             guard self.save() else { return }
             NSApp.keyWindow?.makeFirstResponder(nil)
             self.creationFolder = folder; self.checklistFolder = folder; self.sidebarOverlay = false

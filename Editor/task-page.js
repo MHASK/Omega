@@ -27,6 +27,8 @@ export class TaskPage {
   if(this.composer){const existing=this.lookup(this.composer.item.id);if(existing)this.composer.item=existing.item;else this.composer=null;}
   this.render();return true;
  }
+ navigationState(){const scroll=this.element.querySelector('.tasks-body,.task-detail-scroller');return {view:this.view,detail:this.detail,goal:this.goalView,collapsed:[...this.collapsed],expanded:[...this.expandedList],groups:[...this.collapsedGroups],top:scroll?.scrollTop||0,left:this.element.querySelector('.board')?.scrollLeft||0,savedScroll:this.savedScroll||0};}
+ restoreNavigation(state){this.view=state.view==='board'?'board':'list';this.detail=this.lookup(state.detail)?state.detail:null;this.goalView=state.goal==='all'||this.model.goals.some(g=>g.id===state.goal)?state.goal:null;this.collapsed=new Set(state.collapsed||[]);this.expandedList=new Set(state.expanded||[]);this.collapsedGroups=new Set(state.groups||[]);this.savedScroll=state.savedScroll||0;this.render();const scroll=this.element.querySelector('.tasks-body,.task-detail-scroller');if(scroll)scroll.scrollTop=state.top||0;const board=this.element.querySelector('.board');if(board)board.scrollLeft=state.left||0;}
  lookup(id){return this.model?walkTasks(this.model).find(e=>e.item.id===id)||null:null;}
  reference(ref){if(ref.startsWith('g:'))return this.model.goals[Number(ref.slice(2))];let item;for(const [depth,index] of ref.slice(2).split('.').map(Number).entries())item=(depth?item?.children:this.model.tasks)?.[index];return item;}
  promote(item){this.reparent(item,null);}

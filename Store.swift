@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import WebKit
 
 // Watch the file and its directory: editors commonly save by replacing the
 // inode. Re-arm the file watch after every directory event, with polling as a
@@ -55,6 +56,83 @@ final class Notebook: ObservableObject {
     @Published var collapsedNotebooks: Set<String> = []
     @Published var creationFolder: URL?
     @Published var checklistFolder: URL?
+    @Published var taskHeaderInset: CGFloat = 0
+    struct NavigationLocation {
+        let url: URL
+        let folder: Bool
+        var state: [String: Any] = [:]
+        func matches(_ other: NavigationLocation?) -> Bool { other?.url == url && other?.folder == folder }
+    }
+    @Published private var backwardLocations: [NavigationLocation] = []
+    @Published private var forwardLocations: [NavigationLocation] = []
+    @Published private(set) var navigating = false
+    private var pendingNavigation: NavigationLocation?
+    var canGoBack: Bool { !backwardLocations.isEmpty }
+    var canGoForward: Bool { !forwardLocations.isEmpty }
+    private var navigationLocation: NavigationLocation? {
+        if let folder = checklistFolder { return NavigationLocation(url: folder, folder: true) }
+        return selected.map { NavigationLocation(url: $0, folder: false) }
+    }
+    private func captureNavigation(_ completion: @escaping (NavigationLocation?) -> Void) {
+        guard var location = navigationLocation else { completion(nil); return }
+        let web = location.folder ? folderTasksEditor?.webView : richEditor?.webView
+        guard let web else { completion(location); return }
+        web.evaluateJavaScript("window.folio.navigationState?.()") { value, _ in
+            location.state = value as? [String: Any] ?? [:]
+            completion(location)
+        }
+    }
+    func navigate(_ action: @escaping () -> Void, evenWithinPage: Bool = false) {
+        guard !navigating, !gitSyncing else { return }
+        navigating = true
+        synchronizeEditors { success in
+            guard success else { self.navigating = false; return }
+            self.captureNavigation { previous in
+                action()
+                if let previous, self.navigationLocation != nil, !previous.matches(self.navigationLocation) || evenWithinPage {
+                    self.backwardLocations.append(previous)
+                    self.backwardLocations = Array(self.backwardLocations.suffix(80))
+                    self.forwardLocations.removeAll()
+                }
+                self.navigating = false
+            }
+        }
+    }
+    func travelNavigation(forward: Bool) {
+        guard !navigating, !gitSyncing, !showingSettings else { return }
+        navigating = true
+        synchronizeEditors { success in
+            guard success, self.save() else { self.navigating = false; return }
+            self.captureNavigation { previous in
+                var candidates = forward ? self.forwardLocations : self.backwardLocations
+                var target: NavigationLocation?
+                while let next = candidates.popLast() {
+                    var directory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: next.url.path, isDirectory: &directory), directory.boolValue == next.folder, self.owner(of: next.url) != nil { target = next; break }
+                }
+                guard let target else {
+                    if forward { self.forwardLocations = [] } else { self.backwardLocations = [] }
+                    self.navigating = false; return
+                }
+                if target.folder {
+                    self.creationFolder = target.url; self.checklistFolder = target.url; self.sidebarOverlay = false
+                } else { self.performSelect(target.url) }
+                guard target.matches(self.navigationLocation) else { self.navigating = false; return }
+                self.pendingNavigation = target
+                if forward { self.forwardLocations = candidates; if let previous { self.backwardLocations.append(previous) } }
+                else { self.backwardLocations = candidates; if let previous { self.forwardLocations.append(previous) } }
+                self.navigating = false
+                if target.folder { self.folderTasksEditor?.refresh() }
+                else { self.richEditor?.update() }
+            }
+        }
+    }
+    func restoreNavigation(in webView: WKWebView?, folder: Bool) {
+        guard let target = pendingNavigation, target.folder == folder, target.matches(navigationLocation), let webView else { return }
+        pendingNavigation = nil
+        let json = String(decoding: AssistantWire.json(target.state), as: UTF8.self)
+        webView.evaluateJavaScript("window.folio.restoreNavigation(\(json))", completionHandler: nil)
+    }
     @Published private(set) var notebookTints = UserDefaults.standard.dictionary(forKey: "notebookColors") as? [String: String] ?? [:]
     func tint(for url: URL) -> NotebookTint { NotebookTint(rawValue: notebookTints[url.path] ?? "") ?? .sky }
     func setTint(_ tint: NotebookTint?, for url: URL) {
@@ -413,18 +491,18 @@ final class Notebook: ObservableObject {
     }
 
     func select(_ url: URL) {
-        afterSync { self.performSelect(url) }
+        navigate { self.performSelect(url) }
     }
 
     func selectLinkedItem(_ url: URL, kind: String, id: String) {
-        afterSync {
+        navigate({
             self.performSelect(url)
             if self.selected == url { self.richEditor?.queueItem(url, kind: kind, id: id) }
-        }
+        }, evenWithinPage: true)
     }
 
     func selectSearchResult(_ result: NoteSearchResult) {
-        afterSync {
+        navigate {
             self.performSelect(result.url)
             if self.selected == result.url, !self.searching, let anchor = result.anchor {
                 self.searchReveal = SearchReveal(url: result.url, anchor: anchor)
@@ -433,12 +511,12 @@ final class Notebook: ObservableObject {
     }
 
     private func performSelect(_ url: URL) {
-        checklistFolder = nil
         searchReveal = nil
-        if url == selected { searching = false; query = ""; sidebarOverlay = false; return }
+        if url == selected { checklistFolder = nil; searching = false; query = ""; sidebarOverlay = false; return }
         guard save() else { return }
         do {
             let value = try String(contentsOf: url, encoding: .utf8)
+            checklistFolder = nil
             observeHistory(value, at: url)
             if let owner = owner(of: url) {
                 root = owner; entries = trees[owner] ?? entries; collapsedNotebooks.remove(owner.path)

@@ -145,11 +145,13 @@ struct FolioView: View {
             let compact = geometry.size.width < minimumSidebar + minimumDocument
             let docked = notebook.sidebar && !compact
             // Task controls occupy the document's top edge when the window controls are in the sidebar.
-            let edgeTaskHeader = docked && (notebook.checklistFolder != nil || (notebook.selected != nil && TaskDocument.isTaskPage(notebook.text)))
+            let edgeTaskHeader = (docked || geometry.size.width > 760 * scale) && (notebook.checklistFolder != nil || (notebook.selected != nil && TaskDocument.isTaskPage(notebook.text)))
             let width = compact
                 ? min(max(220, CGFloat(notebook.sidebarWidth) * scale), max(180, geometry.size.width - 32))
                 : min(CGFloat(notebook.sidebarWidth) * scale, max(minimumSidebar, geometry.size.width - minimumDocument))
             let documentWidth = max(0, geometry.size.width - (docked ? width : 0))
+            let toolbarWidth = docked || (compact && notebook.sidebarOverlay) ? width : min((notebook.fullscreen ? 280 : 348) * toolbarScale, max(180, geometry.size.width - 142 * toolbarScale))
+            let taskInset = edgeTaskHeader && !docked ? toolbarWidth / scale : 0
             HStack(spacing: 0) {
                 if docked {
                     sidebar.frame(width: width)
@@ -218,7 +220,7 @@ struct FolioView: View {
             }
             .overlay(alignment: .top) {
                 HStack(spacing: 0) {
-                    sidebarToolbar.frame(width: docked || (compact && notebook.sidebarOverlay) ? width : min(240 * toolbarScale, max(150, geometry.size.width - 142 * toolbarScale)))
+                    sidebarToolbar.frame(width: toolbarWidth)
                     WindowDragRegion().frame(maxWidth: .infinity).allowsHitTesting(!edgeTaskHeader)
                     if !edgeTaskHeader && notebook.checklistFolder == nil && notebook.selected != nil && !(compact && notebook.sidebarOverlay) {
                         DocumentToolbar(notebook: notebook)
@@ -228,7 +230,8 @@ struct FolioView: View {
                 }.frame(height: headerHeight, alignment: .top)
             }
             .clipped()
-            .onAppear { notebook.visibleSidebarWidth = width; notebook.adaptSidebar(compact: compact) }
+            .onAppear { notebook.visibleSidebarWidth = width; notebook.adaptSidebar(compact: compact); notebook.taskHeaderInset = taskInset }
+            .onChange(of: taskInset) { _, value in notebook.taskHeaderInset = value }
             .onChange(of: width) { _, value in notebook.visibleSidebarWidth = value }
             .onChange(of: compact) { _, value in notebook.adaptSidebar(compact: value) }
         }
@@ -277,6 +280,10 @@ struct FolioView: View {
                 Color.clear.frame(width: 0, height: 24 * toolbarScale)
             }
             Spacer(minLength: 0)
+            HStack(spacing: 1 * toolbarScale) {
+                navigationButton(forward: false)
+                navigationButton(forward: true)
+            }.fixedSize()
             Button { NSApp.sendAction(#selector(AppDelegate.showSettings), to: NSApp.delegate, from: nil) } label: {
                 OpusIcon(glyph: "\u{f013}", size: 11 * toolbarScale)
                     .frame(width: 24 * toolbarScale, height: 24 * toolbarScale).contentShape(Rectangle())
@@ -288,6 +295,16 @@ struct FolioView: View {
             .padding(.top, max(0, 19 - 12 * toolbarScale))
             .frame(height: headerHeight, alignment: .top)
             .background(WindowDragRegion())
+    }
+    func navigationButton(forward: Bool) -> some View {
+        Button { notebook.travelNavigation(forward: forward) } label: {
+            Image(systemName: forward ? "arrow.right" : "arrow.left")
+                .font(.system(size: 11 * toolbarScale, weight: .medium))
+                .frame(width: 22 * toolbarScale, height: 24 * toolbarScale).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .disabled(notebook.navigating || !(forward ? notebook.canGoForward : notebook.canGoBack))
+            .accessibilityLabel(forward ? "Go forward" : "Go back")
+            .help(forward ? "Forward · ⌘]" : "Back · ⌘[")
     }
     func noteCountLabel(compact: Bool) -> some View {
         HStack(spacing: 6 * toolbarScale) {

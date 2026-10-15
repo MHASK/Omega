@@ -38,6 +38,16 @@ Cross-page goal links store a relative page path and a durable item ID, so the l
 
 Before a folder edit is saved, Omega checks the affected files against the versions displayed. Outside changes stop a stale save and show **Copy changes** and **Reload**; the pending proposal is retained locally in `~/Library/Application Support/Omega/Folder task recovery`. Multi-page changes also use per-page backups and undo history. If a write fails after another page was saved, the notice identifies the partial save; reloading displays the actual source files.
 
+## Diagrams and live references
+
+Type `/mermaid`, `/chart`, or `/sequence` to insert a diagram. Mermaid source stays in an ordinary fenced Markdown block. Preview follows the app theme; **Source** edits the drawing, and **Expand** offers zoom and fit. Rendering is bundled and works offline. Invalid syntax stays inside its block, with its source preserved. Diagram-supplied external resources and configuration directives are disabled.
+
+Type `/linked section` to choose a page or heading to quote. Omega reads that source while the note is open and refreshes it about every two seconds, including changes from outside editors. The destination stores only a relative reference in an `omega-quote` code fence. Nested live quotes are shown as source to prevent recursive inclusion. If a heading is renamed, duplicated, removed, or its page is unavailable, the quote asks you to choose the source again. Ordinary copied paragraphs remain independent text.
+
+Task, subtask, goal, and task-page links display live progress. Use `/linked status` or `/linked progress` for a dedicated table cell or inline field. These are ordinary Markdown links labelled `Status` or `Progress`; Omega renders their current value without modifying the destination file. Task statuses use the exact source status, including custom states such as “In review.” Goal progress includes explicitly linked work from other pages in the same notebook. Existing prose summaries are not inferred or overwritten. These read-only projections create no undo steps or Git changes.
+
+Back and forward arrows beside Settings (⌘[ / ⌘]) return to notes, folder task workspaces, task details, filters, and scroll positions. Board columns keep a readable minimum width and scroll horizontally when more statuses are present.
+
 ## Writing
 
 - **Aa** at the top right changes document text size, Default / Serif / Mono typeface, and full width. The sidebar, tasks board and menus keep their own size. These are personal preferences on this Mac; `⌥⌘ +`, `⌥⌘ −` and `⌥⌘ 0` adjust/reset document size.

@@ -101,7 +101,9 @@ function history(direction){
  const from=direction==='undo'?undo:redo,to=direction==='undo'?redo:undo;if(!from.length)return;
  const text=from.pop();to.push(lastSaved);historyAction=direction;view.load(text,{identity:'folder'});pending=text;flush();
 }
-window.folio={command:command=>{if(command==='find'){view.closeDetail();view.element.querySelector('[aria-label="Find folder tasks"]')?.focus();}else history(command);}};
+window.omegaReferenceRequest=(request,links)=>{const item=view.composer?.item||view.lookup(view.detail)?.item;send('references',{request,links,source:sourceOf(item)?.key});};
+window.omegaReferenceOpen=url=>{const item=view.composer?.item||view.lookup(view.detail)?.item;send('link',{source:sourceOf(item)?.key,url});};
+window.folio={navigationState:()=>({tasks:view.navigationState(),query,filter}),restoreNavigation:state=>{query=state.query||'';filter=sources.some(s=>s.key===state.filter)?state.filter:'';view.restoreNavigation(state.tasks||{});return true;},command:command=>{if(command==='find'){view.closeDetail();view.element.querySelector('[aria-label="Find folder tasks"]')?.focus();}else history(command);}};
 view.element.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='z'){e.preventDefault();history(e.shiftKey?'redo':'undo');}});
 window.folderTasks={
  load(config){
@@ -115,7 +117,7 @@ window.folderTasks={
  saved(config){token=config.token;lastSaved=inflight;inflight=null;historyAction=null;updateSaveLabel();if(pending)flush();else if(leaving){const fn=leaving;leaving=null;fn();}},
  failed(message){pending=pending||inflight;inflight=null;historyAction=null;notice(message);},
  notice,
- configure(config){document.documentElement.dataset.theme=config.theme;view.element.style.setProperty('--task-accent',config.accent);configureLabelColors(config.labels);},
+ configure(config){view.element.style.setProperty("--native-toolbar-width",Math.max(0,config.taskHeaderInset||0)+"px");document.documentElement.dataset.theme=config.theme;view.element.style.setProperty('--task-accent',config.accent);configureLabelColors(config.labels);},
  pages(pages){if(linkRequest)picker.setPages(pages);},
  flush(){flush();return {pending:!!pending||!!inflight,failed:!!error};},
  snapshot(){return {text:serializeTasks(view.model),pending:!!pending||!!inflight,error,token};},

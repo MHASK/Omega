@@ -56,7 +56,7 @@ export class PagePicker {
     };
     element.querySelector('[data-close]').onclick=()=>{this.close();this.onClose();};
   }
-  open(kind='page') {this.kind=kind;this.pages=[];this.ready=false;this.input.value='';this.input.placeholder=kind==='mention'?'Mention a page or live collaborator…':kind==='goal'?'Link to a goal…':kind==='task'?'Link to a task or subtask…':kind==='all'?'Link to a page, task, or goal…':'Link to a page…';this.input.setAttribute('aria-label',this.input.placeholder);this.element.setAttribute('aria-label',this.input.placeholder);this.element.hidden=false;this.render();}
+  open(kind='page') {this.kind=kind;this.pages=[];this.ready=false;this.input.value='';this.input.placeholder=kind==='section'?'Quote a page or heading…':kind==='status'?'Link a task or goal status…':kind==='progress'?'Link completion progress…':kind==='mention'?'Mention a page or live collaborator…':kind==='goal'?'Link to a goal…':kind==='task'?'Link to a task or subtask…':kind==='all'?'Link to a page, task, or goal…':'Link to a page…';this.input.setAttribute('aria-label',this.input.placeholder);this.element.setAttribute('aria-label',this.input.placeholder);this.element.hidden=false;this.render();}
   close() {this.element.hidden=true;}
   setPages(pages) {this.pages=pages;this.ready=true;this.render();}
   render() {

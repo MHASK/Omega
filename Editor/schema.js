@@ -6,7 +6,9 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import {DiagramCodeBlock} from './diagrams.js';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import {LiveReferences} from './linked-content.js';
 import { common, createLowlight } from 'lowlight';
 import katex from 'katex';
 import { PageLink } from './page-links.js';
@@ -133,14 +135,15 @@ function mathNode(block) {
   });
 }
 
-export function extensions({nativeHistory = false} = {}) {
+export function extensions({nativeHistory = false, quoted = false} = {}) {
   return [
     StarterKit.configure({ undoRedo: nativeHistory ? false : {}, codeBlock: false, underline: false, trailingNode: false, link: false }), PageLink, TextColor, Highlight, Underline, CommentAnchor, CommentRecord, SourceComment, InlineSourceComment,
     Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
     Table.configure({ resizable: true, lastColumnResizable: false, cellMinWidth: 90 }), TableRow,
     TableHeader.extend({ content: 'paragraph' }), TableCell.extend({ content: 'paragraph' }),
-    TaskList, TaskItem.configure({ nested: true }), LocalImage,
-    CodeBlockLowlight.configure({ lowlight: createLowlight(common), defaultLanguage: null }),
+    TaskList, TaskItem.configure({ nested: true }), quoted ? LocalImage.extend({addNodeView(){return ({node})=>{const dom=document.createElement("span");dom.className="image-label";dom.textContent=node.attrs.alt||"Image in source note";return {dom};};}}) : LocalImage,
+    (quoted ? CodeBlockLowlight : DiagramCodeBlock).configure({ lowlight: createLowlight(common), defaultLanguage: null }),
+    ...(quoted ? [] : [LiveReferences]),
     NoteStart,
     Placeholder.configure({
       showOnlyCurrent: false,

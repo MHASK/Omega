@@ -193,6 +193,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         add(format, "Checklist", #selector(checklist), "l", modifiers: [.command, .shift])
         top(main, "Format", format)
         let view = NSMenu(title: "View")
+        add(view, "Back", #selector(navigateBack), "[")
+        add(view, "Forward", #selector(navigateForward), "]")
+        view.addItem(.separator())
         add(view, "Zoom In", #selector(zoomIn), "=")
         add(view, "Zoom In", #selector(zoomIn), "+")
         view.items.last?.isHidden = true
@@ -251,6 +254,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func saveCopy() { notebook.afterSync { self.notebook.saveCopy() } }
     @objc func rename() { if let url = notebook.selected { notebook.rename(url) } }
     @objc func reveal() { notebook.reveal() }
+    @objc func navigateBack() { notebook.travelNavigation(forward: false) }
+    @objc func navigateForward() { notebook.travelNavigation(forward: true) }
     @objc func sidebar() { notebook.toggleSidebar() }
     @objc func reading() { notebook.reading.toggle() }
     @objc func dark() { notebook.setAppearance(notebook.appearance == "dark" ? "light" : "dark") }
@@ -266,6 +271,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         catch { notebook.status = "Assistant connection unavailable: " + error.localizedDescription }
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(navigateBack) { return notebook.canGoBack && !notebook.navigating && !notebook.showingSettings }
+        if item.action == #selector(navigateForward) { return notebook.canGoForward && !notebook.navigating && !notebook.showingSettings }
         if notebook.checklistFolder != nil {
             let editorActions: [Selector] = [#selector(rename), #selector(sourceMode), #selector(reading), #selector(bold), #selector(italic), #selector(heading), #selector(checklist), #selector(underline), #selector(addComment), #selector(writingLarger), #selector(writingSmaller), #selector(writingReset)]
             if editorActions.contains(where: { $0 == item.action }) { return false }

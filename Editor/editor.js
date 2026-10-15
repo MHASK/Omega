@@ -17,6 +17,7 @@ import { TaskPage, parseTasks } from './task-page.js';
 import {WritingTools} from './writing-tools.js';
 import {BlockTools,blockAt,duplicateBlock} from './block-tools.js';
 import {writingColors} from './writing-schema.js';
+import {diagramExamples} from './diagrams.js';
 
 const $ = id => document.getElementById(id);
 const send = (type, data = {}) => window.webkit?.messageHandlers.folio.postMessage({ type, ...data });
@@ -90,7 +91,7 @@ const sourceHighlight = document.createElement('pre');
 sourceHighlight.id = 'source-highlight'; sourceHighlight.hidden = true; sourceHighlight.setAttribute('aria-hidden', 'true');
 document.body.insertBefore(sourceHighlight, source);
 const icons = { tasklink:'\uf0ae', goallink:'\uf11e', page: '\uf15b', text: '\uf031', h1: 'H₁', h2: 'H₂', h3: 'H₃', h4: 'H₄', h5: 'H₅', h6: 'H₆', bullet: '\uf0ca', numbered: '\uf0cb', checklist: '\uf14a', quote: '\uf10d', code: '\uf121', table: '\uf0ce', divider: '\uf068', image: '\uf03e', equation: '∑' };
-Object.assign(icons,{color:'\uf53f',comment:'\uf075',duplicate:'\uf0c5',delete:'\uf2ed',mention:'\uf1fa'});
+Object.assign(icons,{color:'\uf53f',comment:'\uf075',duplicate:'\uf0c5',delete:'\uf2ed',mention:'\uf1fa',mermaid:'\uf542',chart:'\uf080',sequence:'\uf362',section:'\uf10d',status:'\uf192',progress:'\uf1ce'});
 const commandList = [
  ['text','Text','A plain paragraph',c=>c.setParagraph()],
  ['h1','Heading 1','A big heading',c=>c.setHeading({level:1})],
@@ -102,8 +103,14 @@ const commandList = [
  ['table','Table','Organize things into rows and columns',c=>c.insertTable({rows:3,cols:3,withHeaderRow:true})],
  ['quote','Quote','Give a thought some space',c=>c.toggleBlockquote()],
  ['code','Code block','Code with syntax highlighting',c=>c.toggleCodeBlock()],
+ ['mermaid','Mermaid diagram','Flowcharts, maps, and relationships',c=>c.insertContent([{type:'codeBlock',attrs:{language:'mermaid'},content:[{type:'text',text:diagramExamples.flowchart}]},{type:'paragraph'}])],
+ ['chart','Chart','A clean bar or line chart',c=>c.insertContent([{type:'codeBlock',attrs:{language:'mermaid'},content:[{type:'text',text:diagramExamples.chart}]},{type:'paragraph'}])],
+ ['sequence','Sequence diagram','Show a conversation or sequence',c=>c.insertContent([{type:'codeBlock',attrs:{language:'mermaid'},content:[{type:'text',text:diagramExamples.sequence}]},{type:'paragraph'}])],
  ['divider','Divider','A quiet break',c=>c.setHorizontalRule()],
  ['page','Link to page','Link to another note or document',null],
+ ['section','Linked section','A quote that stays in sync with its source',null],
+ ['status','Linked status','Current status of a task or goal',null],
+ ['progress','Linked progress','Live completion from a task, goal, or page',null],
  ['tasklink','Link to task','Link to a task or subtask',null],
  ['goallink','Link to goal','Link to a goal',null],
  ['image','Image','Choose an image from your Mac',null],
@@ -157,7 +164,10 @@ function rectAtSelection() {
 }
 function finishLink(page){
  const request=pageRequest;pagePicker.close();pageRequest=null;
- if(request?.id===identity&&request.editor&&!request.editor.isDestroyed)insertPageLink(request.editor,page,request.range,request.doc,request.preserveText);
+ if(request?.id===identity&&request.editor&&!request.editor.isDestroyed){
+  if(request.kind==='section'&&request.editor.state.doc.eq(request.doc))request.editor.chain().focus().setTextSelection(request.range).insertContent([{type:'codeBlock',attrs:{language:'omega-quote'},content:[{type:'text',text:page.href}]},{type:'paragraph'}]).run();
+  else insertPageLink(request.editor,{...page,name:request.kind==='status'?'Status':request.kind==='progress'?'Progress':page.name},request.range,request.doc,request.preserveText);
+ }
 }
 const pagePicker = new PagePicker($('page-picker'), page=>{
  const request=pageRequest;if(!request||request.pending)return;
@@ -178,7 +188,7 @@ function openPagePicker(range, preserveText=true, target=editor, kind='page') {
  pagePicker.open(kind);place(pagePicker.element,rect.left,rect.bottom);
  if(rect.bottom+pagePicker.element.offsetHeight+8>innerHeight)place(pagePicker.element,rect.left,rect.top,true);
  pagePicker.input.focus({preventScroll:true});
- send('pages',{id:identity,request:pageRequest.request,kind:kind==='mention'?'all':kind});
+ send('pages',{id:identity,request:pageRequest.request,kind:kind==='mention'||kind==='status'||kind==='progress'?'all':kind});
 }
 function updateMenus() {
  if(writing.busy||!blocks.menu.hidden){bubble.hidden=true;slash.hidden=true;tableTools.hidden=true;hideTableEdges();return;}
@@ -255,7 +265,7 @@ document.addEventListener('scroll',event=>{
 function runSlash(command){
  if(!slashRange)return;
  const range=slashRange;slashRange=null;slash.hidden=true;dismissedSlash=null;
- if(['page','tasklink','goallink','mention'].includes(command[0])){openPagePicker(range,false,editor,command[0]==='mention'?'mention':command[0]==='page'?'page':command[0]==='goallink'?'goal':'task');return;}
+ if(['page','tasklink','goallink','mention','section','status','progress'].includes(command[0])){openPagePicker(range,false,editor,['section','status','progress','mention'].includes(command[0])?command[0]:command[0]==='page'?'page':command[0]==='goallink'?'goal':'task');return;}
  const name=command[0];
  if(['color','comment','duplicate','delete'].includes(name)||name.startsWith('color-')||name.startsWith('highlight-')){
   editor.chain().focus().deleteRange(range).run();const block=blockAt(editor,editor.state.selection.from);if(!block)return;const selection={from:block.from+1,to:block.to-1};
@@ -371,6 +381,8 @@ function find(forward=true){
  else{const results=[];editor.state.doc.descendants((node,pos)=>{if(node.isText){let at=0;while((at=node.text.toLowerCase().indexOf(query.toLowerCase(),at))>=0){results.push({from:pos+at,to:pos+at+query.length});at+=query.length;}}});const selection=editor.state.selection;const result=forward?(results.find(r=>r.from>=selection.to)||results[0]):([...results].reverse().find(r=>r.to<=selection.from)||results.at(-1));if(result)editor.chain().focus().setTextSelection(result).scrollIntoView().run();}
 }
 $('find-input').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();find(!e.shiftKey);}if(e.key==='Escape'){$('find').hidden=true;editor?.commands.focus();}};$('find-next').onclick=()=>find();$('find-close').onclick=()=>{$('find').hidden=true;editor?.commands.focus();};
+window.omegaReferenceRequest=(request,links)=>send('references',{id:identity,request,links});
+window.omegaReferenceOpen=url=>send('link',{id:identity,url});
 window.folio={
  load(config){
   if(live){live.destroy();live=null;send('liveStopped');}
@@ -397,6 +409,7 @@ window.folio={
  },
  configure(config){
   writing.configure(config,{taskMode,sourceMode});
+  if(config.taskHeaderInset!==undefined)taskPage.element.style.setProperty("--native-toolbar-width",Math.max(0,config.taskHeaderInset||0)+"px");
   if(config.labelColors!==undefined)configureLabelColors(config.labelColors);
   document.documentElement.dataset.theme=config.theme==='dark'?'dark':'light';
   if(config.accent)taskPage.element.style.setProperty('--task-accent',config.accent);
@@ -405,6 +418,8 @@ window.folio={
   if(lastScale!==(config.zoom||1)){$('toast').textContent=Math.round((config.zoom||1)*100)+'%';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,1100);lastScale=config.zoom||1;}
   readOnly=!!config.reading;taskPage.setReadOnly(readOnly||undoHistory.busy||recoveryPreview);source.readOnly=readOnly||undoHistory.busy;editor?.setEditable(!readOnly&&!undoHistory.busy,false);
  },
+ navigationState(){return taskMode?{tasks:taskPage.navigationState()}:{top:(sourceMode?source:scroller).scrollTop,selection:editor?.state.selection.toJSON()};},
+ restoreNavigation(state){if(taskMode){taskPage.restoreNavigation(state.tasks||{});}else{if(editor&&state.selection){try{editor.commands.setTextSelection({from:Math.min(state.selection.anchor||1,editor.state.doc.content.size),to:Math.min(state.selection.head||1,editor.state.doc.content.size)});}catch{}}(sourceMode?source:scroller).scrollTop=state.top||0;}return true;},
  snapshot(){if(live)live.checkpoint();return {id:identity,text:value()};},
  liveStart(config){
   if(config.id!==identity||live||recoveryPreview)return false;
@@ -438,7 +453,7 @@ window.folio={
  liveStop(){if(!live)return;const text=value();live.destroy();live=null;this.load({id:identity,text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});},
  linkReady(result){if(result.id!==identity||result.request!==pageRequest?.request)return;if(result.page)finishLink(result.page);else{pageRequest.pending=false;pagePicker.list.textContent=result.error||'This item changed. Close the picker and try again.';}},
  revealItem(config){return config.id===identity&&taskMode&&taskPage.revealItem(config.item,config.kind);},
- pageResults(result){if(result.id===identity&&result.request===pageRequest?.request&&!pagePicker.element.hidden){pagePicker.setPages([...(pageRequest.kind==='mention'?liveMentions(live?.presence.awareness.getStates().values()):[]),...(result.pages||[])]);const rect=pageRequest.rect;place(pagePicker.element,rect.left,rect.bottom);if(rect.bottom+pagePicker.element.offsetHeight+8>innerHeight)place(pagePicker.element,rect.left,rect.top,true);}},
+ pageResults(result){if(result.id===identity&&result.request===pageRequest?.request&&!pagePicker.element.hidden){pagePicker.setPages([...(pageRequest.kind==='mention'?liveMentions(live?.presence.awareness.getStates().values()):[]),...(result.pages||[]).filter(p=>pageRequest.kind!=='status'||p.reference||p.kind==='task'||p.kind==='subtask'||p.kind==='goal')]);const rect=pageRequest.rect;place(pagePicker.element,rect.left,rect.bottom);if(rect.bottom+pagePicker.element.offsetHeight+8>innerHeight)place(pagePicker.element,rect.left,rect.top,true);}},
  historyResult(result){undoHistory.result(result);},
  applyExternal(config){
   if(config.id!==identity)return {status:'deferred'};
@@ -493,7 +508,7 @@ window.folio={
   if((name==='undo'||name==='redo')&&live){if(!readOnly&&!editor?.view.composing)live.undoChange(name==='redo');return;}
   if(name==='undo'||name==='redo'){
    if(taskMode&&taskPage.composer&&!taskPage.composer.inserted){document.execCommand(name);return;}
-   if(!taskMode&&document.activeElement?.matches('input,textarea')&&document.activeElement!==source){document.execCommand(name);return;}
+   if(!taskMode&&document.activeElement?.matches('input,textarea')&&document.activeElement!==source&&!document.activeElement.matches('.diagram-input,.linked-quote-input')){document.execCommand(name);return;}
    if(!readOnly&&!editor?.view.composing)undoHistory.request(name==='redo');return;
   }
   if(name==='find'){$('find').hidden=false;$('find-input').focus();return;}

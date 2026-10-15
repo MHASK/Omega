@@ -58,9 +58,9 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance { resolved = tint.usingColorSpace(.sRGB) ?? .gray }
         let accent = String(format: "#%02x%02x%02x", Int(resolved.redComponent * 255), Int(resolved.greenComponent * 255), Int(resolved.blueComponent * 255))
         let labelConfig = String(decoding: (try? JSONSerialization.data(withJSONObject: notebook.labelColors, options: [.sortedKeys])) ?? Data(), as: UTF8.self)
-        let settings = "\(theme)|\(notebook.zoom)|\(notebook.reading)|\(accent)|\(labelConfig)|\(notebook.writingScale)|\(notebook.writingFont)|\(notebook.writingWide)"
-        if loadedID == identity && settings == lastConfiguration { revealPending(); revealItemPending(); return }
-        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors, "writingScale": notebook.writingScale, "writingFont": notebook.writingFont, "writingWide": notebook.writingWide, "author": NSFullUserName(), "nativeHeader": true]
+        let settings = "\(theme)|\(notebook.zoom)|\(notebook.reading)|\(accent)|\(labelConfig)|\(notebook.writingScale)|\(notebook.writingFont)|\(notebook.writingWide)|\(notebook.taskHeaderInset)"
+        if loadedID == identity && settings == lastConfiguration { revealPending(); revealItemPending(); notebook.restoreNavigation(in: webView, folder: false); return }
+        let config: [String: Any] = ["id": identity, "text": notebook.text, "theme": theme, "zoom": notebook.zoom, "reading": notebook.reading, "accent": accent, "labelColors": notebook.labelColors, "writingScale": notebook.writingScale, "writingFont": notebook.writingFont, "writingWide": notebook.writingWide, "author": NSFullUserName(), "nativeHeader": true, "taskHeaderInset": notebook.taskHeaderInset]
         guard let data = try? JSONSerialization.data(withJSONObject: config), let json = String(data: data, encoding: .utf8) else { return }
         if loadedID != identity {
             LiveCollaboration.shared.stop()
@@ -84,6 +84,7 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
                     self.notebook?.editorLoading = false; self.notebook?.editorLoadError = nil
                     LiveCollaboration.shared.prepare(self)
                     self.revealItemPending()
+                    self.notebook?.restoreNavigation(in: webView, folder: false)
                     if self.notebook?.searchReveal != nil { self.revealPending() }
                     else if self.notebook?.text.isEmpty == true { self.focus() }
                 }
@@ -196,6 +197,11 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             notebook.documentIsSource = body["source"] as? Bool ?? false
         case "writingZoom": notebook.changeWritingSize(body["direction"] as? Int ?? 0)
         case "image": chooseImage()
+        case "references":
+            guard body["id"] as? String == identity, let source = notebook.selected, let request = body["request"] as? String, let hrefs = body["links"] as? [String] else { return }
+            let response: [String: Any] = ["request": request, "rows": LinkedContent.rows(hrefs, from: source, notebook: notebook)]
+            let json = String(decoding: AssistantWire.json(response), as: UTF8.self)
+            webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
         case "pages":
             guard body["id"] as? String == identity, let request = body["request"] as? String, let note = notebook.selected else { return }
             var seen = Set<String>(), pages: [[String: String]] = []
@@ -207,7 +213,15 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
                     let location = root.lastPathComponent + (subpath.isEmpty ? "" : " / " + subpath)
                     let href = NoteLinks.href(from: note, to: entry.url)
                     if (kind == "all" || kind == "page") && entry.url != note { pages.append(["name": entry.name, "location": location, "href": href, "kind": "page"]) }
-                    if kind != "page", entry.isTaskPage {
+                    if kind == "section", entry.url != note, let size = try? entry.url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 500_000,
+                       let text = try? String(contentsOf: entry.url, encoding: .utf8) {
+                        pages.append(["name": entry.name, "location": location + " / Entire page", "href": href, "kind": "page"])
+                        let headings = LinkedContent.headings(text)
+                        for heading in headings where headings.filter({ $0.title == heading.title }).count == 1 {
+                            pages.append(["name": heading.title, "location": location + " / " + entry.name, "href": LinkedContent.sectionHref(href, title: heading.title), "kind": "page"])
+                        }
+                    }
+                    if kind != "page" && kind != "section", entry.isTaskPage {
                         guard let text = entry.url == note ? notebook.text : (try? String(contentsOf: entry.url, encoding: .utf8)), let document = try? TaskDocument(markdown: text) else { continue }
                         let revision = AssistantWire.hash(text)
                         for ref in document.references where ref.details.draft != true && (kind == "all" || (kind == "goal" ? ref.kind == "goal" : ref.kind != "goal")) {
@@ -318,5 +332,84 @@ struct RichEditor: NSViewRepresentable {
         LiveCollaboration.shared.stop()
         view.configuration.userContentController.removeScriptMessageHandler(forName: "folio")
         if coordinator.notebook?.richEditor === coordinator { coordinator.notebook?.richEditor = nil }
+    }
+}
+
+// Read-only projections. A reference never copies the source into the quoting
+// note or rewrites the user's table. All paths use the normal notebook boundary.
+@MainActor enum LinkedContent {
+    static func headings(_ text: String) -> [(line: Int, level: Int, title: String)] {
+        var result: [(Int, Int, String)] = [], fence: Character?
+        for (i, line) in text.components(separatedBy: "\n").enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                if fence == trimmed.first { fence = nil } else if fence == nil { fence = trimmed.first }
+                continue
+            }
+            guard fence == nil else { continue }
+            let hashes = line.prefix { $0 == "#" }.count
+            guard (1...6).contains(hashes), line.dropFirst(hashes).first == " " else { continue }
+            let title = line.dropFirst(hashes + 1).trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty { result.append((i, hashes, title)) }
+        }
+        return result
+    }
+    static func sectionHref(_ href: String, title: String) -> String {
+        href + "#omega-section-" + (title.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
+    }
+    static func rows(_ hrefs: [String], from source: URL, notebook: Notebook) -> [[String: Any]] {
+        var cache: [URL: String] = [:]
+        return Array(Set(hrefs)).sorted().prefix(100).map { href in
+            var row: [String: Any] = ["href": href]
+            do {
+                guard href.count < 4096, let url = NoteLinks.resolve(href, from: source, roots: notebook.roots), !notebook.isArchived(url) else { throw TaskPageError("Source page is unavailable.") }
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true, (values.fileSize ?? 0) < 500_000 else { throw TaskPageError("This source is too large to preview.") }
+                let text: String
+                if let cached = cache[url] { text = cached }
+                else { text = url == notebook.selected ? notebook.text : try String(contentsOf: url, encoding: .utf8); cache[url] = text }
+                var excerpt = text, name = url.deletingPathExtension().lastPathComponent
+                if let fragment = href.split(separator: "#", maxSplits: 1).dropFirst().first, fragment.hasPrefix("omega-section-") {
+                    let heading = String(fragment.dropFirst(14)).removingPercentEncoding ?? ""
+                    let entries = headings(text), matches = entries.filter { $0.title == heading }
+                    guard matches.count == 1, let entry = matches.first else { throw TaskPageError("This heading was renamed, removed, or is no longer unique. Choose its source again.") }
+                    let lines = text.components(separatedBy: "\n")
+                    let end = entries.first { $0.line > entry.line && $0.level <= entry.level }?.line ?? lines.count
+                    excerpt = lines[(entry.line + 1)..<end].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    name += " / " + heading
+                }
+                row["name"] = name; row["markdown"] = excerpt
+                if let fragment = href.split(separator: "#", maxSplits: 1).dropFirst().first, fragment.hasPrefix("folio-goal-"),
+                   let document = try? TaskDocument(markdown: text), let goal = document.goals.first(where: { $0.details.id == String(fragment.dropFirst(11)) }) {
+                    let own = document.goalProgress(goal)
+                    var total = own.linked.count, completed = own.completed
+                    if let owner = notebook.owner(of: url) {
+                        for entry in NoteFiles.flatten(notebook.trees[owner] ?? []) where !entry.isFolder && entry.url != url && !notebook.isArchived(entry.url) {
+                            guard let size = try? entry.url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 500_000 else { continue }
+                            let otherText: String
+                            if let cached = cache[entry.url] { otherText = cached }
+                            else if let read = try? String(contentsOf: entry.url, encoding: .utf8) { otherText = read; cache[entry.url] = read }
+                            else { continue }
+                            guard otherText.contains("omegaGoalSources") else { continue }
+                            let other = (try? TaskDocument(markdown: otherText)) ?? (try? InlineTaskDocument(otherText, preferences: notebook.taskPreferences).document)
+                            guard let other else { continue }
+                            for ref in other.references where ref.kind != "goal" && ref.details.draft != true {
+                                guard case .object(let links) = ref.details.extra["omegaGoalSources"] else { continue }
+                                let linked = (ref.details.goals ?? []).contains { alias in
+                                    guard case .object(let link) = links[alias], case .string(let path) = link["path"], case .string(let id) = link["id"] else { return false }
+                                    return id == goal.details.id && entry.url.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL == url.standardizedFileURL
+                                }
+                                if linked { total += 1; if ref.status == other.completedStatus { completed += 1 } }
+                            }
+                        }
+                    }
+                    let done = total > 0 ? completed == total : goal.completed
+                    row["goalProgress"] = ["name": goal.title, "total": max(1, total), "completed": total > 0 ? completed : (done ? 1 : 0), "status": done ? "Done" : completed > 0 ? "In progress" : "Not started"]
+                }
+                if TaskDocument.isTaskPage(text) { _ = try TaskDocument(markdown: text); row["tasks"] = text }
+                else if let inline = try? InlineTaskDocument(text, preferences: notebook.taskPreferences), !inline.document.tasks.isEmpty { row["tasks"] = inline.document.markdown }
+            } catch { row["error"] = error.localizedDescription }
+            return row
+        }
     }
 }
