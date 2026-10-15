@@ -19,6 +19,53 @@ import WebKit
         while Date() < deadline { if predicate() { return }; try await Task.sleep(for: .milliseconds(20)) }
         throw GitFailure("Timed out: " + label)
     }
+    @MainActor static func coldTaskStartup(temp: URL) async throws {
+        let root = temp.appendingPathComponent("Cold tasks")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let note = root.appendingPathComponent("Tasks.md")
+        let markdown = "<!-- folio:tasks -->\n# Cold task startup\n\n## To do\n- [ ] First task\n"
+        try DraftRecovery.write(markdown, to: note)
+        let notebook = Notebook(recovery: DraftRecovery(directory: temp.appendingPathComponent("Cold recovery")))
+        notebook.notebooks = [root]; notebook.appearance = "dark"; notebook.zoom = 1.4
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: FolioView(notebook: notebook))
+        host.sizingOptions = []; host.safeAreaRegions = []; host.autoresizingMask = [.width, .height]
+        window.contentView = host
+        // The real app restores the selected note after the initial empty shell mounts.
+        try await Task.sleep(for: .milliseconds(50))
+        notebook.loadFolder(root, selecting: note)
+        try await wait("cold task editor ready") { notebook.richEditor?.ready == true }
+        try await Task.sleep(for: .milliseconds(400))
+        let web = notebook.richEditor!.webView!
+        let metrics = try await web.evaluateJavaScript("({title:document.querySelector('.tasks-title')?.value,width:innerWidth,height:innerHeight,rect:document.querySelector('#task-page')?.getBoundingClientRect().height})") as! [String: Any]
+        try require(metrics["title"] as? String == "Cold task startup", "restored task page renders on the first load")
+        try require(!notebook.editorLoading && notebook.editorLoadError == nil, "startup loading indicator clears only after the editor loads")
+        try require(web.bounds.width > 300 && web.bounds.height > 300 && (metrics["rect"] as? Double ?? 0) > 300, "restored task page has a visible native and web layout")
+        notebook.richEditor!.retryLoad()
+        try require(notebook.editorLoading, "reloading the web view visibly reports loading")
+        try await wait("retry task editor ready") { notebook.richEditor?.ready == true && !notebook.editorLoading }
+        let restored = try await web.evaluateJavaScript("window.folio.snapshot().text") as! String
+        try require(restored == markdown, "reloading preserves the original task document")
+        let second = root.appendingPathComponent("Second.md")
+        try DraftRecovery.write("# Another note\n", to: second)
+        _ = try await web.evaluateJavaScript("window.folio.load=config=>{window.folio.snapshot=()=>({id:config.id,text:'Stale partial model'});throw new Error('Fixture render failure')};true")
+        notebook.select(second)
+        try await wait("second note selected") { notebook.selected == second }
+        // A hidden test window does not receive normal display passes.
+        host.layoutSubtreeIfNeeded(); notebook.richEditor!.update()
+        try await Task.sleep(for: .milliseconds(500))
+        try await wait("failed renderer is explained") { notebook.editorLoadError != nil }
+        try require(!notebook.editorLoading && !notebook.dirty, "a failed render offers recovery without changing the note")
+        let synchronized: Bool = await withCheckedContinuation { continuation in
+            notebook.richEditor!.synchronize { continuation.resume(returning: $0) }
+        }
+        try require(synchronized && notebook.text == "# Another note\n" && !notebook.dirty, "a failed renderer cannot save its partial model over the original file")
+        notebook.richEditor!.retryLoad()
+        try await wait("failed renderer recovers") { notebook.richEditor?.ready == true && !notebook.editorLoading && notebook.editorLoadError == nil }
+        let secondText = try await web.evaluateJavaScript("window.folio.snapshot().text") as! String
+        try require(secondText == "# Another note\n" && String(contentsOf: second, encoding: .utf8) == secondText, "retry after a render error restores the selected file exactly")
+        window.contentView = nil
+    }
     @MainActor static func run() async throws {
         let temp = URL(fileURLWithPath: CommandLine.arguments[1]), root = temp.appendingPathComponent("Notebook")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -29,6 +76,7 @@ import WebKit
         notebook.root = root; notebook.notebooks = [root]; notebook.appearance = "dark"; notebook.zoom = 1
         notebook.entries = try NoteFiles.scan(root); notebook.trees[root] = notebook.entries; notebook.select(note)
         OpusIcons.register()
+        try await coldTaskStartup(temp: temp)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 680), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         let host = NSHostingView(rootView: FolioView(notebook: notebook)); window.contentView = host
         try await wait("editor ready") { notebook.richEditor?.ready == true }

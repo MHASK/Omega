@@ -14,6 +14,7 @@ source=work/'AppWithoutMain.swift'
 source.write_text(Path('App.swift').read_text().replace('@main\n','',1))
 args=shlex.split(next(l for l in Path('build.sh').read_text().splitlines() if l.startswith('xcrun swiftc')))
 args[args.index('App.swift')]=str(source)
+args[args.index('-O')]='-Onone'; args.remove('-whole-module-optimization')
 args.insert(args.index('-o'),'Tests/ExternalEditCheck.swift')
 args[args.index('-o')+1]=str(app/'Contents/MacOS/Check')
 subprocess.run(args,check=True)

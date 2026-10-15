@@ -253,6 +253,8 @@ final class Notebook: ObservableObject {
     @Published var status = "All changes saved"
     @Published var revision = UUID()
     @Published var loading = false
+    @Published var editorLoading = true
+    @Published var editorLoadError: String?
     @Published var draggedURL: URL?
     @Published var dragPoint = CGPoint.zero
     @Published var dragDestination: URL?

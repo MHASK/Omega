@@ -42,6 +42,7 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     var ready = false
     private var loadedID = ""
     private var loadedReadyID = ""
+    private var pendingLoadID: String?
     private var lastReveal: UUID?
     private var pendingItem: (url: URL, kind: String, id: String)?
     private var lastConfiguration = ""
@@ -65,10 +66,22 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             LiveCollaboration.shared.stop()
             loadedID = identity; loadedReadyID = ""; lastConfiguration = settings
             let requestedID = identity
+            pendingLoadID = requestedID
+            // SwiftUI may call update() while laying out this representable.
+            // Publish loading state on the next turn, and ignore stale requests.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.identity == requestedID, self.pendingLoadID == requestedID else { return }
+                self.notebook?.editorLoading = true; self.notebook?.editorLoadError = nil
+            }
             webView.evaluateJavaScript("window.folio.load(\(json))") { [weak self] _, error in
-                if let error { self?.notebook?.showError(error) }
-                else if let self, self.identity == requestedID {
+                guard let self, self.identity == requestedID else { return }
+                self.pendingLoadID = nil
+                if let error {
+                    self.notebook?.editorLoading = false
+                    self.notebook?.editorLoadError = error.localizedDescription
+                } else {
                     self.loadedReadyID = requestedID
+                    self.notebook?.editorLoading = false; self.notebook?.editorLoadError = nil
                     LiveCollaboration.shared.prepare(self)
                     self.revealItemPending()
                     if self.notebook?.searchReveal != nil { self.revealPending() }
@@ -109,7 +122,9 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         }
     }
     func synchronize(_ completion: @escaping (Bool) -> Void) {
-        guard ready, let webView else { completion(true); return }
+        // A failed or pending load may contain a partial model from the prior
+        // note. Only a successfully loaded identity can supply edits to save.
+        guard ready, loadedReadyID == identity, let webView else { completion(true); return }
         webView.evaluateJavaScript("window.folio.snapshot()") { [weak self] value, error in
             guard let self else { completion(true); return }
             if let error { self.notebook?.showError(error); completion(false); return }
@@ -256,8 +271,24 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(navigationAction.request.url?.host == "app" && navigationAction.request.url?.scheme == "folio" ? .allow : .cancel)
     }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        ready = false; loadedID = ""; loadedReadyID = ""; webView.reload()
+    func retryLoad() {
+        ready = false; loadedID = ""; loadedReadyID = ""; pendingLoadID = nil
+        notebook?.editorLoading = true; notebook?.editorLoadError = nil
+        webView?.reload()
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { retryLoad() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.evaluateJavaScript("typeof window.folio?.load === 'function'") { [weak self] result, error in
+            guard let self, !self.ready else { return }
+            if let error { self.loadingFailed(error) }
+            else if result as? Bool != true { self.loadingFailed(AssistantError("The editor resources could not be loaded. Try opening the editor again.")) }
+        }
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loadingFailed(error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { loadingFailed(error) }
+    private func loadingFailed(_ error: Error) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        ready = false; notebook?.editorLoading = false; notebook?.editorLoadError = error.localizedDescription
     }
 }
 

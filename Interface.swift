@@ -159,6 +159,23 @@ struct FolioView: View {
                         RichEditor(notebook: notebook)
                             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                             .overlay(alignment: .bottom) { ScrollEdgeFade(surface: Ink.paper, height: 24 * scale) }
+                            .overlay {
+                                if notebook.editorLoading || notebook.editorLoadError != nil {
+                                    ZStack {
+                                        Color(nsColor: Ink.paper)
+                                        VStack(spacing: 12) {
+                                            if notebook.editorLoadError != nil {
+                                                Text("The editor couldn’t open this note").fontWeight(.medium)
+                                                Text("Your saved file is unchanged.").foregroundStyle(.secondary)
+                                                Button("Try again") { notebook.richEditor?.retryLoad() }
+                                            } else {
+                                                ProgressView().controlSize(.small)
+                                                Text("Opening note…").foregroundStyle(.secondary)
+                                            }
+                                        }.font(.system(size: 13))
+                                    }
+                                }
+                            }
                             .accessibilityHidden(notebook.checklistFolder != nil)
                     } else {
                         VStack(alignment: .leading, spacing: 18 * scale) {

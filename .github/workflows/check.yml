@@ -27,6 +27,7 @@ jobs:
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --mcp-test'
       - run: '"$RUNNER_TEMP/Omega.app/Contents/MacOS/Folio" --undo-test'
       - run: zsh Tests/check-notebook-migration.sh
+      - run: zsh Tests/check-external-edits.sh
       - run: zsh Tests/check-checklists.sh
       - run: xcrun swiftc -parse-as-library Core.swift Recovery.swift UndoHistory.swift Tests/WebTaskCheck.swift -o "$RUNNER_TEMP/WebTaskCheck" -framework AppKit -framework WebKit -lsqlite3
       - run: '"$RUNNER_TEMP/WebTaskCheck" "$PWD/Resources" "$RUNNER_TEMP/tasks.png"'
