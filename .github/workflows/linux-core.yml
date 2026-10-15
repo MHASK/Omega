@@ -1,0 +1,26 @@
+name: Linux shared core (not a desktop release)
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    container: swift:6.2.3-jammy
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update -qq && apt-get install -y libsqlite3-dev pkg-config git
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Editor/package-lock.json
+      - run: swift test -j 4
+      - run: npm ci --prefix Editor
+      - run: npm test --prefix Editor
+      - run: node Tests/task-import-contract.mjs
+      - run: npm ci --prefix Relay
+      - run: npm test --prefix Relay

@@ -22,6 +22,8 @@ A calm, open-source Markdown notes and tasks app for macOS, with live collaborat
 - In notes, type `/task` for a simple checklist. Click the checklist icon beside a notebook or right-click a folder → **View tasks** for a live list grouped by source note. A full-width header shows overall progress and Open / Done / All filters; source groups collapse individually. Includes subfolders and existing task pages; excludes archived notes and goals. Completing an item updates its original file, with no duplicate task document.
 - Simple task lists and boards, nested subtasks, descriptions, due dates, labels, and linked goals.
 - Manage task statuses and shared pastel labels in Settings (⌘,).
+- Extra task metadata from outside tools is preserved through edits, task moves, MCP changes and current-version live collaboration. Multiline JSON, optional null fields, BOM/blank prefixes, and `*` / `+` checklist bullets are accepted.
+- Invalid imports explain the problem and line number. If the file was already open, its last valid task view remains available read-only; the latest Markdown is always the saved version. A valid outside repair automatically restores editing. Separate table rows are flagged without guessing how to rewrite them.
 - Valid status names added by an outside editor are recognized even before they have a section heading. Imported goal status metadata is preserved; goal progress continues to follow linked work or its checkbox.
 - Local recovery checkpoints, atomic file saves, persistent undo, and update backups.
 - Optional Git notebooks with existing GitHub/GitLab CLI login.
@@ -64,7 +66,7 @@ Restart/reconnect the client after updating Omega. The service supports notes, f
 
 Open notes update as writes arrive. MCP clients identify themselves during connection, so Omega can show “Updated by Claude” or “Updated by Codex” beside the document controls. Changed passages briefly highlight without moving your selection. Direct filesystem edits are labeled “Updated externally” because a file write does not reliably identify its author. This is edit activity, not a simulated assistant cursor: MCP does not send a continuous caret position.
 
-Omega watches the open file, including atomic file replacements, and keeps a periodic fallback check. Independent outside edits merge with unsaved typing; overlapping edits retain the local recovery copy and the outside file, with a review indicator instead of an automatic interruption. Updates wait while an editing dialog or text composition is active.
+Omega watches the open file, including atomic file replacements, and keeps a periodic fallback check. Direct filesystem updates must remain unchanged for a short interval before display, avoiding partial-file flashes during chunked writes. Independent outside edits merge with unsaved typing; overlapping edits retain the local recovery copy and the outside file, with a review indicator instead of an automatic interruption. Updates wait while an editing dialog or text composition is active.
 
 ## Git notebooks
 
@@ -116,6 +118,12 @@ xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitAutoSyncCheck.swif
 ```
 
 Tests use temporary notes and isolated preferences. GitHub Actions runs editor and native checks on pushes and pull requests.
+
+## Linux status
+
+A Linux desktop release is **not available yet**. The release requirement is full Mac feature parity, including Git sync and review, live cursors, settings, MCP, recovery, and a verified update path. A limited notes-only build will not be published as a completed Linux port.
+
+The shared Swift package compiles the actual task/checklist, file-link, Git sync/merge, recovery, SQLite undo, and CRDT-checkpoint storage code on Linux. Run `swift test` with Swift 6.2 or newer, Git, and SQLite development headers. The same editor and memory-only relay tests also run on Linux. These checks establish data compatibility; they do not constitute a Linux desktop app. See [the parity checklist](Portable/README.md).
 
 ## Publish a release
 

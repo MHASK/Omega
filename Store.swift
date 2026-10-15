@@ -202,13 +202,14 @@ final class Notebook: ObservableObject {
     @Published var selected: URL? {
         didSet {
             guard oldValue != selected else { return }
-            updateActivity = nil; externalConflict = false
+            updateActivity = nil; externalConflict = false; pendingDiskRead = nil
             fileWatcher.watch(selected) { [weak self] in self?.refreshFromDisk(reload: false) }
         }
     }
     @Published var updateActivity: NoteUpdateActivity?
     private let fileWatcher = OpenNoteWatcher()
     private var externalConflict = false
+    private var pendingDiskRead: (text: String, since: TimeInterval)?
     func showUpdate(_ message: String, at file: URL, pending: Bool = false) {
         guard selected == file else { return }
         let activity = NoteUpdateActivity(file: file, message: message, pending: pending)
@@ -896,6 +897,17 @@ final class Notebook: ObservableObject {
         guard let selected else { return }
         if let current = try? String(contentsOf: selected, encoding: .utf8), current != diskText {
             saveTask?.cancel()
+            // Direct writers may truncate and refill a file in several writes.
+            // Observe the same bytes twice before changing the visible document.
+            let now = ProcessInfo.processInfo.systemUptime
+            if pendingDiskRead?.text != current { pendingDiskRead = (current, now) }
+            if now - (pendingDiskRead?.since ?? now) < 0.18 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    if self?.selected == selected { self?.refreshFromDisk(reload: false) }
+                }
+                return
+            }
+            pendingDiskRead = nil
             if let editor = richEditor {
                 checking = true
                 if !externalConflict { showUpdate("Receiving changes…", at: selected, pending: true) }
@@ -936,7 +948,16 @@ final class Notebook: ObservableObject {
             text = current; diskText = current; revision = UUID(); status = "Updated from disk"
             showUpdate("Updated externally", at: selected)
         } else if !FileManager.default.fileExists(atPath: selected.path) {
+            pendingDiskRead = nil
             status = "File moved or deleted — edit to save a copy"
+        } else {
+            let wasWaiting = pendingDiskRead != nil
+            pendingDiskRead = nil
+            // A writer may restore the unchanged baseline after a partial write.
+            // Resume the autosave we paused, without replacing unreadable bytes.
+            if wasWaiting, dirty, (try? String(contentsOf: selected, encoding: .utf8)) == diskText {
+                _ = save(automatically: true)
+            }
         }
     }
 

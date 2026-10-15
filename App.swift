@@ -350,9 +350,20 @@ func runSelfTests() {
         precondition(store.save())
         let saved = try String(contentsOf: note, encoding: .utf8)
         precondition(saved == original + "\nSaved locally.")
+        let pending = saved + "\nKeep my unsaved words."
+        store.edit(pending)
+        try "# Half a write".write(to: note, atomically: false, encoding: .utf8)
+        store.refreshFromDisk()
+        precondition(store.text == pending && store.dirty)
+        try saved.write(to: note, atomically: false, encoding: .utf8)
+        store.refreshFromDisk()
+        precondition(!store.dirty && (try? String(contentsOf: note, encoding: .utf8)) == pending)
         let external = "# Changed externally\n"
         try external.write(to: note, atomically: true, encoding: .utf8)
         store.refreshFromDisk()
+        precondition(store.text == pending) // A direct write is observed before it is displayed.
+        let reloadDeadline = Date().addingTimeInterval(1)
+        while store.text != external && Date() < reloadDeadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
         precondition(store.text == external)
         store.newNote()
         precondition(store.selected?.lastPathComponent == "Untitled.md")

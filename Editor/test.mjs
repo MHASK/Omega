@@ -249,7 +249,7 @@ assert.deepEqual(normalized(parseTasks(serializeTasks(custom))),normalized(custo
 assert.equal(parseTasks(customSource+'\n## backlog\n'),null);
 assert.equal(parseTasks(customSource.replace('## Review','## Goals')),null);
 assert.equal(parseTasks(customSource.replace('"Shipped"','23')),null);
-assert.equal(parseTasks(customSource.replace('- [ ] Draft','- [ ] Draft\n  <!-- folio:task {"unknown": "keep me"} -->')),null);
+assert.equal(parseTasks(customSource.replace('- [ ] Draft','- [ ] Draft\n  <!-- folio:task {"unknown": "keep me"} -->')).tasks[0].details.unknown,'keep me');
 assert.equal(parseTasks(customSource.replace('- [ ] Draft','- [ ] Draft\n  <!-- folio:task {"due": "2026-02-30"} -->')),null);
 const customView=new TaskPage(document.createElement('div'),()=>{});document.body.append(customView.element);assert(customView.load(customSource));
 customView.element.querySelector('[aria-label="Complete task"]').click();
@@ -257,7 +257,7 @@ assert.equal(parseTasks(customView.raw).tasks.find(t=>t.title==='Draft').status,
 assert.equal(customView.element.querySelector('.status-complete').dataset.status,'2');
 customView.element.querySelector('.status-complete [aria-label="Complete task"]').click();
 assert.equal(parseTasks(customView.raw).tasks.find(t=>t.title==='Draft').status,0);
-console.log('PASS: custom status/complete marker roundtrip, unknown metadata fallback, invalid dates, duplicate/reserved names, custom completion and reopen behavior.');
+console.log('PASS: custom status/complete marker roundtrip, preserved extra metadata, invalid dates, duplicate/reserved names, custom completion and reopen behavior.');
 
 // A move is a single model mutation, preserving the full tree and every field.
 import {reparentTask,walkTasks,subtaskStatus} from './task-model.js';
@@ -399,7 +399,7 @@ runWritingCollaborationTests();
 // Git merges the same durable CRDT states used by the live editor. Offline edits
 // and assistant changes in Markdown must survive without duplicate baselines.
 import {mergeGitCheckpoints,sharedText,patchShared} from './git-checkpoints.js';
-import {Y,seedModel,encode,decode} from './live-model.js';
+import {Y,seedModel,encode,decode,readTasks,updateTasks,taskText} from './live-model.js';
 const cp=doc=>({state:encode(Y.encodeStateAsUpdate(doc)),text:sharedText(doc),accepted:true});
 const fork=doc=>{const next=new Y.Doc({gc:false});Y.applyUpdate(next,Y.encodeStateAsUpdate(doc));return next;};
 const common=seedModel('Shared words.\n','source'),left=fork(common),right=fork(common);
@@ -460,3 +460,19 @@ runExternalTests();
 
 import {runSourceCommentTests} from './source-comments-test.mjs';
 runSourceCommentTests();
+
+// New metadata survives concurrent work and Git checkpoints, including keys
+// that resemble object internals. Each unknown top-level field merges alone.
+{
+ const fixture=taskMarker+'\n# Shared metadata\n## Goals\n- [ ] Goal\n  <!-- folio:task {"id":"g","status":"Planning","external":{"owner":"claude"}} -->\n## To do\n- [ ] Task\n  <!-- folio:task {"id":"t","priority":"high","vendor":{"x":1},"__proto__":{"literal":true}} -->\n';
+ const a=seedModel(fixture,'tasks'),b=new Y.Doc();Y.applyUpdate(b,Y.encodeStateAsUpdate(a));
+ const originalA=readTasks(a),originalB=readTasks(b),nextA=structuredClone(originalA),nextB=structuredClone(originalB);
+ nextA.tasks[0].details.priority='low';nextB.tasks[0].details.vendor={x:2};
+ updateTasks(a,nextA,originalA);updateTasks(b,nextB,originalB);
+ Y.applyUpdate(a,Y.encodeStateAsUpdate(b));Y.applyUpdate(b,Y.encodeStateAsUpdate(a));
+ const saved=parseTasks(taskText(a));assert.equal(taskText(a),taskText(b));
+ assert.equal(saved.tasks[0].details.priority,'low');assert.deepEqual(saved.tasks[0].details.vendor,{x:2});
+ assert.deepEqual(saved.tasks[0].details.__proto__,{literal:true});assert.equal(saved.goals[0].details.status,'Planning');assert.deepEqual(saved.goals[0].details.external,{owner:'claude'});
+ a.destroy();b.destroy();
+ console.log('PASS: opaque task/goal metadata survives concurrent edits, separate-key merges, and Markdown projection.');
+}

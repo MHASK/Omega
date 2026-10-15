@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import CSQLite
+#endif
 
 // Markdown remains the source of truth. This local journal stores reversible
 // UTF-8 splices, with no age/count pruning. SQLite commits each edit durably.

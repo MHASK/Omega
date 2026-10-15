@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 // A write-ahead draft survives termination before the normal autosave fires.
 // Never replace a file that has diverged from the draft's original contents.

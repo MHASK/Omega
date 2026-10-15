@@ -1,3 +1,4 @@
+import {safeCombinedImport,tableIssue} from './import-health.js';
 import assert from 'node:assert/strict';
 import {Editor} from '@tiptap/core';
 import {extensions} from './schema.js';
@@ -11,6 +12,13 @@ export function runExternalTests(){
  assert.equal(mergeExternal('Hello','Hello A','Hello A'),'Hello A');
  assert.equal(mergeExternal('one two three','ONE two three','one two THREE'),'ONE two THREE');
  assert.equal(mergeExternal('abc','ac','aXbc'),null,'Insertion at a deletion boundary needs a choice');
+ const tasks='<!-- folio:tasks -->\n# Work\n## To do\n- [ ] Parent\n  <!-- folio:task {"id":"parent"} -->\n  - [ ] Child\n    <!-- folio:task {"id":"child"} -->\n';
+ const localIDs=tasks.replace('"id":"parent"','"id":"shared"'),remoteIDs=tasks.replace('"id":"child"','"id":"shared"');
+ const combinedIDs=mergeExternal(tasks,localIDs,remoteIDs);assert(combinedIDs!==null);
+ assert.equal(safeCombinedImport(tasks,localIDs,remoteIDs,combinedIDs),false,'Individually valid ID changes must not create duplicate IDs in a merge');
+ assert.equal(tableIssue('| A | B |\n|---|---|\n| 1 | 2 |'),null);
+ assert(tableIssue('| A | B |\n|---|---|\n| 1 | 2 |\n\nA paragraph.\n\n| 3 | 4 |'));
+ assert.equal(tableIssue('```md\n| A | B |\n```'),null);
  const make=text=>new Editor({element:document.createElement('div'),extensions:[...extensions(),ExternalEditHighlight],content:text,contentType:'markdown'});
  const e=make(base),n=make(base.replace('Alpha','Incoming').replace('Last','Final'));
  let middle;e.state.doc.descendants((node,pos)=>{if(node.isText&&node.text.includes('Middle'))middle=pos+3;});

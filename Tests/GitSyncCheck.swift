@@ -1,6 +1,9 @@
 import Foundation
 
-@main struct GitSyncCheck {
+#if SWIFT_PACKAGE
+@testable import OmegaCore
+#endif
+struct GitSyncCheck {
     static func main() throws {
         let fm = FileManager.default, git = GitRunner(timeout: 20)
         let temp = fm.temporaryDirectory.appendingPathComponent("OmegaGitTests-" + UUID().uuidString).resolvingSymlinksInPath()
@@ -88,3 +91,7 @@ import Foundation
         print("Git checks passed: notes-only commits, two-copy sync, safe merges, conflict preservation, staged-content protection, remote validation.")
     }
 }
+
+#if !SWIFT_PACKAGE
+@main struct GitSyncCheckMain { static func main() throws { try GitSyncCheck.main() } }
+#endif

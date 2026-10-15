@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 import {diffChars} from 'diff';
-import {parseTasks,serializeTasks,walkTasks,subtaskStatus} from './task-model.js';
+import {parseTasks,serializeTasks,walkTasks,subtaskStatus,detailKeys} from './task-model.js';
 export {Y};
 export const localOrigin=Object.freeze({local:true});
 export const remoteOrigin=Object.freeze({remote:true});
@@ -12,7 +12,7 @@ function flatten(model){
  const items=new Map();
  for(const {item,parent} of [...model.goals.map(item=>({item,parent:null,goal:true})),...walkTasks(model)]){
   const goal=model.goals.includes(item),siblings=goal?model.goals:parent?.children||model.tasks;
-  items.set(item.id,{title:item.title,description:item.details.description||'',labels:item.details.labels||[],goals:item.details.goals||[],due:item.details.due||'',draft:!!item.details.draft,done:item.done,goal,parent:parent?.id||'',order:siblings.indexOf(item),status:goal?'':model.statuses[parent?subtaskStatus(model,item):item.status]});
+  items.set(item.id,{extra:Object.fromEntries(Object.entries(item.details).filter(([key])=>!detailKeys.has(key))),goalStatus:goal?item.details.status||'':'',title:item.title,description:item.details.description||'',labels:item.details.labels||[],goals:item.details.goals||[],due:item.details.due||'',draft:!!item.details.draft,done:item.done,goal,parent:parent?.id||'',order:siblings.indexOf(item),status:goal?'':model.statuses[parent?subtaskStatus(model,item):item.status]});
  }return items;
 }
 export function updateTasks(doc,next,previous){
@@ -27,6 +27,7 @@ export function updateTasks(doc,next,previous){
     if(prior&&equal(prior[key],value))continue;
     if(['title','description'].includes(key)){if(!item.has(key))item.set(key,new Y.Text());changeText(item.get(key),value);}
     else if(['labels','goals'].includes(key)){if(!item.has(key))item.set(key,new Y.Map());const set=item.get(key);for(const v of prior?.[key]||[])if(!value.includes(v))set.delete(v);for(const v of value)if(!prior?.[key]?.includes(v))set.set(v,true);}
+    else if(key==='extra'){if(!item.has(key))item.set(key,new Y.Map());const fields=item.get(key);for(const name of Object.keys(prior?.extra||{}))if(!Object.hasOwn(value,name))fields.delete(name);for(const [name,v] of Object.entries(value))if(!prior||!equal(prior.extra?.[name],v))fields.set(name,v);}
     else item.set(key,value);
    }
   }
@@ -39,8 +40,9 @@ export function readTasks(doc){
  for(const [,v] of entries){const s=v.get('status');if(s&&!statuses.includes(s))statuses.push(s);}if(!statuses.includes(completed))statuses.push(completed);
  const model={title:doc.getText('title').toString(),statuses,completed,goals:[],tasks:[]},byID=new Map();
  for(const [id,v] of entries){
-  const details={id},description=v.get('description')?.toString()||'';if(description)details.description=description;
+  const details={...Object.fromEntries([...(v.get('extra')?.entries()||[])].filter(([key])=>!detailKeys.has(key))),id},description=v.get('description')?.toString()||'';if(description)details.description=description;
   for(const key of ['labels','goals']){const values=[...(v.get(key)?.keys()||[])].sort();if(values.length)details[key]=values.slice(0,key==='labels'?12:32);}
+  if(v.get('goal')&&v.get('goalStatus'))details.status=v.get('goalStatus');
   if(v.get('due'))details.due=v.get('due');if(v.get('draft'))details.draft=true;
   byID.set(id,{id,title:v.get('title')?.toString()||'',done:!!v.get('done'),details,children:[],status:Math.max(0,statuses.indexOf(v.get('status')))});
  }

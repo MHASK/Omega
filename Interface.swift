@@ -145,7 +145,7 @@ struct FolioView: View {
             let compact = geometry.size.width < minimumSidebar + minimumDocument
             let docked = notebook.sidebar && !compact
             // Task controls occupy the document's top edge when the window controls are in the sidebar.
-            let edgeTaskHeader = docked && (notebook.checklistFolder != nil || (notebook.selected != nil && notebook.text.hasPrefix(TaskDocument.marker)))
+            let edgeTaskHeader = docked && (notebook.checklistFolder != nil || (notebook.selected != nil && TaskDocument.isTaskPage(notebook.text)))
             let width = compact
                 ? min(max(220, CGFloat(notebook.sidebarWidth) * scale), max(180, geometry.size.width - 32))
                 : min(CGFloat(notebook.sidebarWidth) * scale, max(minimumSidebar, geometry.size.width - minimumDocument))

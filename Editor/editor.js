@@ -1,3 +1,5 @@
+import {isTaskDocument} from './task-model.js';
+import {importIssue,tableIssue,safeCombinedImport} from './import-health.js';
 import {mergeExternal,patchRichDocument,ExternalEditHighlight,externalEditKey} from './external-edits.js';
 import {mergeGitCheckpoints} from './git-checkpoints.js';
 import {LiveEditor} from './live-editor.js';
@@ -18,7 +20,8 @@ import {writingColors} from './writing-schema.js';
 
 const $ = id => document.getElementById(id);
 const send = (type, data = {}) => window.webkit?.messageHandlers.folio.postMessage({ type, ...data });
-let taskMode = false, live = null;
+let taskMode = false, live = null, recoveryPreview = false, lastTask = null;
+let renderIssue = null;
 let editor, identity = '', original = '', initialDoc, sourceMode = false, forcedSource = false, requestedSource = false, loading = false, readOnly = false;
 let slashRange = null, dismissedSlash = null, entryCallback, lastScale = 1, toastTimer;
 const scroller = $('scroller'), bubble = $('bubble'), slash = $('slash'), tableTools = $('table-tools'), source = $('source');
@@ -30,6 +33,23 @@ const blocks=new BlockTools({refresh:()=>requestAnimationFrame(updateMenus),disa
 function turnInto(kind){const command=commandList.find(c=>c[0]===(kind==='paragraph'?'text':kind));if(command?.[3])command[3](editor.chain().focus()).run();}
 const rowAdd = $('table-add-row'), columnAdd = $('table-add-column');
 const taskPage=new TaskPage($('task-page'),(_text,typing)=>{beforeSelection=JSON.stringify({tasks:true});typingEdit=!!typing;emitChange();cursor();},{pick:(target,range,kind)=>openPagePicker(range,false,target,kind),picking:()=>!pagePicker.element.hidden,open:href=>send('link',{id:identity,url:href})});
+const health=document.createElement('aside');health.id='import-health';health.hidden=true;health.setAttribute('role','status');document.body.prepend(health);
+function updateHealth(){
+ const text=value(),issue=renderIssue||importIssue(text)||(!taskMode&&!sourceMode?tableIssue(text):null);
+ health.replaceChildren();health.hidden=!issue;sourceHighlight.style.top='0px';document.body.classList.toggle('has-import-issue',!!issue);
+ if(!issue)return;
+ const copy=document.createElement('div'),title=document.createElement('strong'),message=document.createElement('span');
+ title.textContent=recoveryPreview?'Showing the last valid task view · read only':issue.warning?'Check this table':'Markdown preserved';
+ message.textContent=(issue.line?`Line ${issue.line} · `:'')+issue.message;
+ copy.append(title,message);health.append(copy);
+ const action=document.createElement('button');action.textContent=sourceMode&&lastTask?'Last valid view':sourceMode?'Try visual view':'View Markdown';
+ action.onclick=()=>{
+  if(sourceMode&&lastTask&&importIssue(value()))window.folio.load({id:identity,text:value(),reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});
+  else if(sourceMode){window.folio.load({id:identity,text:value(),reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});}
+  else {const line=issue.line;window.folio.load({id:identity,text:value(),source:true,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});if(line){const at=source.value.split('\n').slice(0,line-1).join('\n').length+(line>1?1:0);source.focus();source.setSelectionRange(at,at);cursor();}}
+ };
+ health.append(action);sourceHighlight.style.top=health.getBoundingClientRect().height+'px';
+}
 function selectionState() {
  if(taskMode)return JSON.stringify({tasks:true});
  return JSON.stringify(sourceMode ? {source:true,from:source.selectionStart,to:source.selectionEnd}
@@ -37,13 +57,13 @@ function selectionState() {
 }
 const undoHistory = historyQueue({
  snapshot:()=>({id:identity,text:value()}),
- lock:locked=>{taskPage.setReadOnly(readOnly||locked);source.readOnly=readOnly||locked;editor?.setEditable(!readOnly&&!locked,false);},
+ lock:locked=>{taskPage.setReadOnly(readOnly||locked||recoveryPreview);source.readOnly=readOnly||locked;editor?.setEditable(!readOnly&&!locked,false);},
  send:request=>send('history',request),
  apply:result=>{
   let selection;try{selection=JSON.parse(result.selection);}catch{}
   const scroll=scroller.scrollTop, sourceScroll=source.scrollTop;
-  loading=true;hideMenus();writing.reset();blocks.reset();clearMatch();original=result.text;
-  if(!selection?.source&&parseTasks(original)){taskMode=true;sourceMode=false;forcedSource=false;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;taskPage.load(original,{identity});loading=false;cursor();return;}
+  loading=true;hideMenus();writing.reset();blocks.reset();clearMatch();recoveryPreview=false;renderIssue=null;original=result.text;
+  if(!selection?.source&&parseTasks(original)){taskMode=true;sourceMode=false;forcedSource=false;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;taskPage.load(original,{identity});lastTask={id:identity,text:original};loading=false;updateHealth();cursor();return;}
   taskMode=false;taskPage.element.hidden=true;
   forcedSource=needsSource(original);
   sourceMode=forcedSource||(selection ? !!selection.source : sourceMode);
@@ -62,7 +82,7 @@ const undoHistory = historyQueue({
    queueMicrotask(()=>editor?.commands.focus());
    editor.commands.scrollIntoView();
   }
-  cursor();
+  updateHealth();cursor();
  },
 });
 let matchTimer, matchVisible = false;
@@ -104,13 +124,14 @@ const slashMenu = new SlashMenu(slash, commandList, icons, runSlash, () => {
 });
 installScrollIndicators();
 function value() {
+ if(recoveryPreview)return original;
  if(live?.kind==='rich')return editor?.getMarkdown()+'\n';
  if(taskMode)return taskPage.raw;
  if (sourceMode) return source.value;
  if (!editor || editor.state.doc.eq(initialDoc)) return original;
  return editor.getMarkdown() + (original.endsWith('\n') || !original ? '\n' : '');
 }
-function emitChange() { if(!loading)live?.changed(value()); if (!loading && !undoHistory.busy) send('change', { id: identity, text: value(), beforeSelection, afterSelection:selectionState(), typing:typingEdit }); typingEdit=false; }
+function emitChange() { if(!loading)live?.changed(value()); if (!loading && !undoHistory.busy) send('change', { id: identity, text: value(), beforeSelection, afterSelection:selectionState(), typing:typingEdit }); typingEdit=false;if(!loading&&!health.hidden)updateHealth(); }
 function cursor() {
  if(taskMode){send('cursor',{id:identity,line:1,column:1});return;}
  if (sourceMode) {
@@ -293,7 +314,7 @@ for(const id of ['table-rows','table-columns','table-more'])$(id).onchange=e=>{
  else runTableAction(editor,action);
  requestAnimationFrame(updateMenus);
 };
-source.oninput=()=>{clearMatch();emitChange();cursor();};source.onselect=cursor;
+source.oninput=()=>{renderIssue=null;clearMatch();emitChange();updateHealth();cursor();};source.onselect=cursor;
 source.onkeydown=e=>{if(e.metaKey&&e.key.toLowerCase()==='z'){e.preventDefault();window.folio.command(e.shiftKey?'redo':'undo');return;}if(e.metaKey&&['=','+','-','0'].includes(e.key)){e.preventDefault();send(e.altKey?'writingZoom':'zoom',{id:identity,direction:e.key==='-'?-1:e.key==='0'?0:1});}};
 document.addEventListener('beforeinput',event=>{
  if(event.target!==source&&!event.target.closest?.('.tiptap'))return;
@@ -305,7 +326,7 @@ document.addEventListener('beforeinput',event=>{
 },true);
 $('mode').onclick=()=>window.folio.command('source');
 scroller.addEventListener('scroll',()=>{hideMenus();$('entry').hidden=true;if(editor?.isActive('table'))updateMenus();},{passive:true});
-window.addEventListener('resize',()=>{hideMenus();clearMatch();});
+window.addEventListener('resize',()=>{hideMenus();clearMatch();if(!health.hidden)updateHealth();});
 source.addEventListener('scroll',()=>{sourceHighlight.scrollTop=source.scrollTop;sourceHighlight.scrollLeft=source.scrollLeft;},{passive:true});
 document.addEventListener('keydown',clearMatch,{capture:true});
 taskPage.element.addEventListener('keydown',event=>{if(event.metaKey&&event.key.toLowerCase()==='z'){event.preventDefault();window.folio.command(event.shiftKey?'redo':'undo');}if(event.metaKey&&['=','+','-','0'].includes(event.key)){event.preventDefault();send(event.altKey?'writingZoom':'zoom',{id:identity,direction:event.key==='-'?-1:event.key==='0'?0:1});}});
@@ -353,15 +374,26 @@ $('find-input').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();find(!e.shi
 window.folio={
  load(config){
   if(live){live.destroy();live=null;send('liveStopped');}
+  if(taskMode&&!recoveryPreview&&taskPage.model)lastTask={id:identity,text:taskPage.raw};
+  if(config.id!==identity)lastTask=null;
+  recoveryPreview=false;renderIssue=null;
   undoHistory.reset();writing.reset();blocks.reset();
   clearMatch();loading=true;identity=config.id;original=config.text||'';readOnly=!!config.reading;requestedSource=!!config.source;hideMenus();$('entry').hidden=true;$('find').hidden=true;
-  if(!config.source&&parseTasks(original)){taskMode=true;sourceMode=false;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;taskPage.load(original,{identity});this.configure(config);loading=false;cursor();return;}
+  const parsed=parseTasks(original);
+  if(parsed)lastTask={id:identity,text:original};
+  recoveryPreview=!!(!config.source&&!parsed&&isTaskDocument(original)&&lastTask?.id===identity);
+  if(!config.source&&(parsed||recoveryPreview)){
+   taskMode=true;sourceMode=false;forcedSource=!!recoveryPreview;editor?.destroy();editor=null;source.hidden=true;scroller.hidden=true;$('mode').hidden=true;taskPage.element.hidden=false;
+   taskPage.load(recoveryPreview?lastTask.text:original,{identity});this.configure(config);loading=false;updateHealth();cursor();return;
+  }
   taskMode=false;taskPage.element.hidden=true;
-  forcedSource=needsSource(original);sourceMode=!!config.source||forcedSource;
-  source.value=original;source.hidden=!sourceMode;source.readOnly=readOnly;scroller.hidden=sourceMode;
-  $('mode').hidden=!sourceMode;$('mode').textContent='Markdown';$('mode').title=forcedSource?'This note uses extended Markdown. Source mode keeps every character intact.':'Return to visual editing';
-  if(!sourceMode)createEditor(original);else{editor?.destroy();editor=null;}
-  scroller.scrollTop=0;source.scrollTop=0;dismissedSlash=null;dismissedPage=null;this.configure(config);loading=false;cursor();
+  forcedSource=needsSource(original)||isTaskDocument(original);sourceMode=!!config.source||forcedSource;
+  source.value=original;
+  if(!sourceMode){try{createEditor(original);}catch{editor?.destroy();editor=null;renderIssue={message:'The visual editor could not open this content. Your original Markdown is intact.'};forcedSource=true;sourceMode=true;}}
+  else{editor?.destroy();editor=null;}
+  source.hidden=!sourceMode;source.readOnly=readOnly;scroller.hidden=sourceMode;
+  $('mode').hidden=!sourceMode;$('mode').textContent='Markdown';$('mode').title=forcedSource?'Original Markdown is preserved. See the explanation above.':'Return to visual editing';
+  scroller.scrollTop=0;source.scrollTop=0;dismissedSlash=null;dismissedPage=null;this.configure(config);loading=false;updateHealth();cursor();
  },
  configure(config){
   writing.configure(config,{taskMode,sourceMode});
@@ -371,11 +403,11 @@ window.folio={
   // WebKit pageZoom scales the document and every editing control together.
   document.documentElement.style.setProperty('--scale',1);
   if(lastScale!==(config.zoom||1)){$('toast').textContent=Math.round((config.zoom||1)*100)+'%';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,1100);lastScale=config.zoom||1;}
-  readOnly=!!config.reading;taskPage.setReadOnly(readOnly||undoHistory.busy);source.readOnly=readOnly||undoHistory.busy;editor?.setEditable(!readOnly&&!undoHistory.busy,false);
+  readOnly=!!config.reading;taskPage.setReadOnly(readOnly||undoHistory.busy||recoveryPreview);source.readOnly=readOnly||undoHistory.busy;editor?.setEditable(!readOnly&&!undoHistory.busy,false);
  },
  snapshot(){if(live)live.checkpoint();return {id:identity,text:value()};},
  liveStart(config){
-  if(config.id!==identity||live)return false;
+  if(config.id!==identity||live||recoveryPreview)return false;
   const host={editor:()=>editor,value,send:(type,data)=>send(type,{id:identity,...data}),composing:()=>editor?.view.composing||taskPage.descriptions.some(e=>e.view?.composing),
    mount(session){loading=true;hideMenus();sourceMode=session.kind==='source';taskMode=session.kind==='tasks';scroller.hidden=sourceMode||taskMode;source.hidden=!sourceMode;taskPage.element.hidden=!taskMode;$('mode').hidden=true;
     if(session.kind==='rich')createEditor('',session);else{writing.reset();blocks.reset();editor?.destroy();editor=null;if(taskMode)taskPage.load(session.text(),{identity});else source.value=session.text();}writing.configure({},{taskMode,sourceMode});loading=false;},
@@ -411,29 +443,29 @@ window.folio={
  applyExternal(config){
   if(config.id!==identity)return {status:'deferred'};
   const current=value(),merged=mergeExternal(config.base,current,config.text);
-  if(merged===null)return {status:'conflict'};
+  if(merged===null||!safeCombinedImport(config.base,current,config.text,merged))return {status:'conflict'};
   if(!this.replaceForAssistant({id:identity,expected:current,text:merged,activity:true}))return {status:'deferred'};
   return {status:'applied',text:value()};
  },
  replaceForAssistant(config){
   if(config.id!==identity || config.expected!==value() || taskPage.busy || undoHistory.busy || writing.busy || !blocks.menu.hidden || editor?.view.composing || !$('entry').hidden || !pagePicker.element.hidden)return false;
   // Compare and replace in one JavaScript turn. A keystroke cannot land between them.
-  if(!taskMode&&!sourceMode&&!parseTasks(config.text)&&!needsSource(config.text)){
+  if(!taskMode&&!sourceMode&&!isTaskDocument(config.text)&&!needsSource(config.text)){
    try{
     const next=editor.schema.nodeFromJSON(editor.markdown.parse(visualMarkdown(config.text))),scroll=scroller.scrollTop;
     beforeSelection=selectionState();typingEdit=false;
     loading=true;
     patchRichDocument(editor,next,{highlight:!!config.activity});
     if(!live){original=config.text;initialDoc=editor.state.doc;}
-    loading=false;scroller.scrollTop=scroll;emitChange();
+    loading=false;scroller.scrollTop=scroll;updateHealth();emitChange();
     if(config.activity){clearTimeout(externalHighlightTimer);const activeEditor=editor;externalHighlightTimer=setTimeout(()=>{if(editor===activeEditor&&!editor.isDestroyed)editor.view.dispatch(editor.state.tr.setMeta(externalEditKey,null).setMeta('addToHistory',false));},4500);}
     return true;
-   }catch{loading=false;return false;}
+   }catch{loading=false;if(live)return false;this.load({id:identity,text:config.text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});emitChange();return true;}
   }
   if(live?.kind==='rich')return false;
   if(live){if(live.kind==='tasks'&&!parseTasks(config.text))return false;live.changed(config.text);live.host.refresh(live);emitChange();return true;}
   if(sourceMode&&!live){
-   if(forcedSource&&!requestedSource&&(parseTasks(config.text)||!needsSource(config.text))){
+   if(forcedSource&&!requestedSource&&(parseTasks(config.text)||(!isTaskDocument(config.text)&&!needsSource(config.text)))){
     this.load({id:identity,text:config.text,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});emitChange();return true;
    }
    const previous=source.value,start=source.selectionStart,end=source.selectionEnd,scroll=source.scrollTop;
@@ -441,12 +473,12 @@ window.folio={
    let prefix=0;while(prefix<previous.length&&prefix<config.text.length&&previous[prefix]===config.text[prefix])prefix++;
    let suffix=0;while(suffix<previous.length-prefix&&suffix<config.text.length-prefix&&previous.at(-suffix-1)===config.text.at(-suffix-1))suffix++;
    const map=p=>p<=prefix?p:p>=previous.length-suffix?p+config.text.length-previous.length:prefix;
-   beforeSelection=selectionState();typingEdit=false;source.value=config.text;source.setSelectionRange(map(start),map(end));source.scrollTop=scroll;emitChange();return true;
+   beforeSelection=selectionState();typingEdit=false;source.value=config.text;source.setSelectionRange(map(start),map(end));source.scrollTop=scroll;updateHealth();emitChange();return true;
   }
   const scroll=scroller.scrollTop, sourceScroll=source.scrollTop;
   const selection=editor?.state.selection.from || 1;
-  if(taskMode || parseTasks(config.text) || sourceMode || needsSource(config.text)){
-   this.load({id:identity,text:config.text,source:sourceMode,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});
+  if(taskMode || isTaskDocument(config.text) || sourceMode || needsSource(config.text)){
+   this.load({id:identity,text:config.text,source:requestedSource,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});
   }else{
    loading=true;editor.commands.setContent(visualMarkdown(config.text),{contentType:'markdown',emitUpdate:false});
    original=config.text;initialDoc=editor.state.doc;loading=false;
@@ -456,7 +488,7 @@ window.folio={
  },
  revealMatch,
  focus(){if(taskMode){taskPage.element.querySelector('.tasks-title')?.focus();return;}sourceMode?source.focus():editor?.commands.focus();},
- insertImage(path){if(!sourceMode)editor.chain().focus().setImage({src:path,alt:path.split('/').at(-1).replace(/\.[^.]+$/,'')}).run();},
+ insertImage(path){if(!sourceMode&&!taskMode&&!readOnly&&editor)editor.chain().focus().setImage({src:path,alt:path.split('/').at(-1).replace(/\.[^.]+$/,'')}).run();},
  command(name){
   if((name==='undo'||name==='redo')&&live){if(!readOnly&&!editor?.view.composing)live.undoChange(name==='redo');return;}
   if(name==='undo'||name==='redo'){

@@ -63,6 +63,17 @@ import WebKit
             try require(Date().timeIntervalSince(start) < 1.5 && notebook.updateActivity?.message == "Updated externally", "file write \(index) appears promptly with an honest source label")
             try require(try await snapshot() == text, "WebKit receives file write \(index) without a page reload")
         }
+        let beforePartial = notebook.text
+        let writer = try FileHandle(forWritingTo: note)
+        try writer.truncate(atOffset: 0)
+        try writer.write(contentsOf: Data("# Half a".utf8))
+        notebook.refreshFromDisk(reload: false)
+        try await Task.sleep(for: .milliseconds(100))
+        try require(try await snapshot() == beforePartial, "an in-progress filesystem write never flashes partial Markdown")
+        try writer.truncate(atOffset: 0); try writer.seek(toOffset: 0)
+        try writer.write(contentsOf: Data(beforePartial.utf8)); try writer.close()
+        try await Task.sleep(for: .milliseconds(350))
+        try require(try await snapshot() == beforePartial, "finishing a chunked write leaves the correct document intact")
         let beforeDialog = notebook.text
         _ = try await js("window.folio.command('appearance');true")
         let waitingText = beforeDialog.replacingOccurrences(of: "Updated final", with: "Received during a dialog")

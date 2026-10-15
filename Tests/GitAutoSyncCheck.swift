@@ -1,6 +1,9 @@
 import Foundation
 
-@main struct GitAutoSyncCheck {
+#if SWIFT_PACKAGE
+@testable import OmegaCore
+#endif
+struct GitAutoSyncCheck {
     static func main() throws {
         setbuf(stdout, nil)
         let fm = FileManager.default, git = GitRunner(timeout: 10)
@@ -89,3 +92,7 @@ import Foundation
         print("Automatic Git synchronization checks passed.")
     }
 }
+
+#if !SWIFT_PACKAGE
+@main struct GitAutoSyncCheckMain { static func main() throws { try GitAutoSyncCheck.main() } }
+#endif

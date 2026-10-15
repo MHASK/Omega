@@ -14,3 +14,6 @@ Relay/node_modules/
 Relay/data/
 
 Website/dist/
+
+.build/
+.swiftpm/

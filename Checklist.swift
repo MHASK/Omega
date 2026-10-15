@@ -14,7 +14,7 @@ enum NoteChecklist {
     private static let list = try! NSRegularExpression(pattern: #"^([ \t]*)(?:[-+*]|[0-9]+[.)])[ \t]+"#)
     private static let fence = try! NSRegularExpression(pattern: #"^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})(.*)$"#)
     static func items(in source: String) -> [NoteChecklistItem] {
-        if source.hasPrefix(TaskDocument.marker) {
+        if TaskDocument.isTaskPage(source) {
             guard let doc = try? TaskDocument(markdown: source) else { return [] }
             return doc.references.filter { $0.kind != "goal" && $0.details.draft != true }.map {
                 NoteChecklistItem(title: $0.title, completed: $0.status == doc.completedStatus,

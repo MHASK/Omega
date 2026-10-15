@@ -4,9 +4,37 @@ const validStatus=name=>typeof name==='string'&&!!name&&name.length<=40&&name===
 let sequence=0;
 export const newTaskID=()=>globalThis.crypto?.randomUUID?.()||`folio-${Date.now().toString(36)}-${++sequence}`;
 const clean=text=>String(text).replace(/[\r\n]+/g,' ');
-const detailKeys=new Set(['id','description','due','labels','status','draft','goals']);
+export const detailKeys=new Set(['id','description','due','labels','status','draft','goals']);
+// Extra metadata belongs to the file, even when Omega has no control for it.
+// Bound nesting and numeric precision so both desktop readers preserve it.
+export function validJSON(value,depth=0){
+ if(depth>16)return false;
+ if(value===null||typeof value==='string'||typeof value==='boolean')return true;
+ if(typeof value==='number')return Number.isFinite(value)&&(!Number.isInteger(value)||Number.isSafeInteger(value));
+ if(Array.isArray(value))return value.every(v=>validJSON(v,depth+1));
+ return !!value&&typeof value==='object'&&Object.values(value).every(v=>validJSON(v,depth+1));
+}
+export function uniqueJSONKeys(json){
+ const tokens=json.match(/"(?:\\.|[^"\\])*"|[{}\[\]:,]/g)||[],stack=[];
+ for(let i=0;i<tokens.length;i++){
+  const token=tokens[i];
+  if(token==='{')stack.push(new Set());else if(token==='[')stack.push(null);
+  else if(token==='}'||token===']')stack.pop();
+  else if(token[0]==='"'&&tokens[i+1]===':'&&stack.at(-1)){
+   const key=JSON.parse(token);if(stack.at(-1).has(key))return false;stack.at(-1).add(key);
+  }
+ }
+ return true;
+}
+export const isTaskDocument=text=>text.replace(/^\uFEFF/,'').trimStart().startsWith(taskMarker);
+export function taskImport(text){
+ let lineNumber=1;
+ const fail=message=>({model:null,issue:{line:lineNumber,message}});
+ try{return parseTaskDocument(text,fail,n=>lineNumber=n);}catch{return fail('The task metadata could not be read. The original file is preserved.');}
+}
+export function parseTasks(text){return taskImport(text).model;}
 export function validDetails(value,child=false){
- if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!detailKeys.has(k)))return false;
+ if(!value||typeof value!=='object'||Array.isArray(value)||!validJSON(value))return false;
  if(value.id!==undefined&&(typeof value.id!=='string'||!/^[\w-]{1,80}$/.test(value.id)))return false;
  if(value.description!==undefined&&(typeof value.description!=='string'||value.description.length>100000))return false;
  if(value.due!==undefined&&(typeof value.due!=='string'||!/^\d{4}-\d\d-\d\d$/.test(value.due)||isNaN(Date.parse(value.due+'T12:00:00Z'))||new Date(value.due+'T12:00:00Z').toISOString().slice(0,10)!==value.due))return false;
@@ -21,44 +49,53 @@ export function walkTasks(model){
  const visit=(items,parent=null,ancestors=[])=>{for(const item of items){entries.push({item,parent,ancestors});visit(item.children||[],item,[...ancestors,item]);}};
  visit(model.tasks);return entries;
 }
-export function parseTasks(text){
- const lines=text.replace(/\r\n/g,'\n').split('\n');if(lines[0]!==taskMarker)return null;
+function parseTaskDocument(text,fail,setLine){
+ const lines=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').split('\n');
+ let first=lines.findIndex(line=>line.trim());if(first<0||lines[first].trim()!==taskMarker)return fail('This note is not a task page.');
  const model={title:'',goals:[],tasks:[],statuses:[],completed:'Done'};let section=null,target=null,titleSeen=false,legacy=0,metadataSeen=false,stack=[];
  const seen=new Set(),ids=new Set();
- for(const line of lines.slice(1)){
-  if(!line.trim())continue;
-  if(!titleSeen&&line.startsWith('<!-- folio:completed ')&&line.endsWith(' -->')){try{model.completed=JSON.parse(line.slice(21,-4));}catch{return null;}if(!validStatus(model.completed))return null;continue;}
+ for(let index=first+1;index<lines.length;index++){
+  setLine(index+1);let line=lines[index];if(!line.trim())continue;
+  if(!titleSeen&&line.startsWith('<!-- folio:completed ')&&line.trimEnd().endsWith(' -->')){try{model.completed=JSON.parse(line.trimEnd().slice(21,-4));}catch{return fail('The completed status must be a quoted name.');}if(!validStatus(model.completed))return fail('The completed status name is invalid.');continue;}
   if(!titleSeen&&line.startsWith('# ')){model.title=line.slice(2);titleSeen=true;continue;}
-  if(line.startsWith('## ')){section=line.slice(3);if(!titleSeen||(section!=='Goals'&&!validStatus(section))||seen.has(section.toLowerCase()))return null;seen.add(section.toLowerCase());if(section!=='Goals')model.statuses.push(section);stack=[];target=null;continue;}
-  const meta=line.match(/^( +)<!-- folio:task (.*) -->$/);
-  if(meta){
-   if(!target||metadataSeen||meta[1].length!==(target.depth+1)*2)return null;
-   let details;try{details=JSON.parse(meta[2]);}catch{return null;}
-   // Outside editors also attach workflow metadata to goals. Preserve it;
-   // a goal's progress still comes from its links or its own checkbox.
-   if(!validDetails(details,true)||details.id&&ids.has(details.id))return null;
+  if(line.startsWith('## ')){section=line.slice(3);if(!titleSeen)return fail('Add the page title before its sections.');if(section!=='Goals'&&!validStatus(section))return fail('Use a valid status name for this section.');if(seen.has(section.toLowerCase()))return fail('This section name is repeated.');seen.add(section.toLowerCase());if(section!=='Goals')model.statuses.push(section);stack=[];target=null;continue;}
+  if(/^ *<!-- folio:task(?:\s|$)/.test(line)){
+   const spaces=line.match(/^ */)[0].length;
+   if(!target||metadataSeen||spaces!==(target.depth+1)*2)return fail('Place one metadata record directly below its task, indented two more spaces.');
+   while(!line.trimEnd().endsWith('-->')&&index+1<lines.length){line+='\n'+lines[++index];if(line.length>131072)return fail('This metadata record is too large.');}
+   const meta=line.trimEnd().match(/^ *<!-- folio:task\s+([\s\S]*?)\s*-->$/);
+   if(!meta||line.length>131072)return fail('Finish the task metadata with a closing -->.');
+   if(!uniqueJSONKeys(meta[1]))return fail('This metadata repeats a JSON field. Keep one value for each field.');
+   let details;try{details=JSON.parse(meta[1]);}catch{return fail('This task has incomplete or invalid JSON metadata.');}
+   if(details&&typeof details==='object'&&!Array.isArray(details))for(const key of detailKeys)if(details[key]===null)delete details[key];
+   if(!validDetails(details,true))return fail('Check the task metadata: field types, dates, IDs, labels, and status names must be valid.');
+   if(details.id&&ids.has(details.id))return fail('Two items use the same task ID. Give each item a different ID.');
    if(details.id){ids.add(details.id);target.item.id=details.id;}
    target.item.details=details;metadataSeen=true;continue;
   }
-  const match=line.match(/^( *)- \[([ xX])\](?: (.*))?$/);if(!titleSeen||!section||!match||match[1].length%2)return null;
-  const depth=match[1].length/2;if(depth>32)return null;
+  const match=line.match(/^( *)[-*+] \[([ xX])\](?: (.*))?$/);
+  if(!titleSeen)return fail('Add a title beginning with # before the tasks.');
+  if(!section)return fail('Place tasks under a status heading beginning with ##.');
+  if(!match)return fail('This line is outside the task format. Keep prose in a task description, or edit the original Markdown.');
+  if(match[1].length%2||match[1].length/2>32)return fail('Indent subtasks by two spaces per level, up to 32 levels.');
+  const depth=match[1].length/2;
   const item={id:`legacy-${++legacy}`,title:match[3]||'',done:match[2]!==' ',details:{},children:[]};metadataSeen=false;
-  if(depth){if(section==='Goals'||!stack[depth-1])return null;stack[depth-1].children.push(item);}
+  if(depth){if(section==='Goals'||!stack[depth-1])return fail('A subtask must follow its parent task.');stack[depth-1].children.push(item);}
   else if(section==='Goals')model.goals.push(item);
   else{item.status=model.statuses.indexOf(section);model.tasks.push(item);}
   stack.length=depth;stack.push(item);target={item,depth};
  }
+ if(!titleSeen)return fail('Add a title beginning with # before the tasks.');
  if(!model.statuses.length)model.statuses=[...defaultStatuses];
  if(!model.statuses.includes(model.completed))model.statuses.push(model.completed);
- // A status can first appear in metadata before an editor adds its section.
- // Materialize that section on the next save instead of losing the task UI.
  for(const {item} of walkTasks(model))if(item.details.status&&!model.statuses.includes(item.details.status))model.statuses.push(item.details.status);
- if(model.statuses.length>12||new Set(model.statuses.map(s=>s.toLowerCase())).size!==model.statuses.length||!titleSeen)return null;
+ if(model.statuses.length>12||new Set(model.statuses.map(s=>s.toLowerCase())).size!==model.statuses.length)return fail('Use at most 12 status names, with no names differing only in capitalization.');
  for(const item of model.tasks)if(item.details.status!==undefined){
-  const status=model.statuses.indexOf(item.details.status);if(status<0)return null;
-  item.status=status;item.done=item.details.status===model.completed;delete item.details.status;
+  item.status=model.statuses.indexOf(item.details.status);item.done=item.details.status===model.completed;delete item.details.status;
  }
- return model;
+ // Temporary UI identities must never collide with a real externally assigned ID.
+ for(const item of [...model.goals,...walkTasks(model).map(e=>e.item)])if(!item.details.id){let id=item.id;while(ids.has(id))id=`legacy-${++legacy}`;item.id=id;ids.add(id);}
+ return {model,issue:null};
 }
 export function subtaskStatus(model,child){return model.statuses.indexOf(child.details?.status||(child.done?model.completed:model.statuses.find(s=>s!==model.completed)||model.completed));}
 // Move the same object and subtree; never rebuild a task from visible fields.

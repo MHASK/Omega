@@ -1,5 +1,8 @@
 import Foundation
-@main struct NoteLinkCheck {
+#if SWIFT_PACKAGE
+@testable import OmegaCore
+#endif
+struct NoteLinkCheck {
     static func main() throws {
         let fm=FileManager.default
         let base=fm.temporaryDirectory.appendingPathComponent("Folio-Links-"+UUID().uuidString).resolvingSymlinksInPath()
@@ -24,3 +27,7 @@ import Foundation
         print("PASS: local and cross-notebook paths, Unicode and reserved characters, missing/closed targets, external URLs and symlink rejection")
     }
 }
+
+#if !SWIFT_PACKAGE
+@main struct NoteLinkCheckMain { static func main() throws { try NoteLinkCheck.main() } }
+#endif

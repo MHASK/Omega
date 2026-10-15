@@ -315,7 +315,7 @@ enum FolioMCP {
         try checkRevision(url, args)
         let text = try string(args, "markdown")
         guard text.utf8.count <= 8_000_000 else { throw AssistantError("Note exceeds the 8 MB limit.") }
-        if text.hasPrefix(TaskDocument.marker) { _ = try TaskDocument(markdown: text) }
+        if TaskDocument.isTaskPage(text) { _ = try TaskDocument(markdown: text) }
         let previous = try String(contentsOf: url, encoding: .utf8)
         if previous == text { completion(FolioMCP.success(try item(url))); return }
         let savedCopy = try backup(url, text: previous)
@@ -539,7 +539,7 @@ enum FolioMCP {
             if name == "create_folder" { try fm.createDirectory(at: url, withIntermediateDirectories: false) }
             else {
                 let text = try string(args, "markdown"); guard text.utf8.count <= 8_000_000 else { throw AssistantError("Note exceeds the 8 MB limit.") }
-                if text.hasPrefix(TaskDocument.marker) { _ = try TaskDocument(markdown: text) }
+                if TaskDocument.isTaskPage(text) { _ = try TaskDocument(markdown: text) }
                 // withoutOverwriting uses an exclusive create, including external races.
                 try notebook.recovery.checkpoint(text, original: "", file: url)
                 try Data(text.utf8).write(to: url, options: .withoutOverwriting)

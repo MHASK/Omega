@@ -61,7 +61,7 @@ enum NoteFiles {
             var taskPage = false
             if let handle = try? FileHandle(forReadingFrom: url) {
                 defer { try? handle.close() }
-                if let data = try? handle.read(upToCount: 64) { taskPage = data.starts(with: Data("<!-- folio:tasks -->".utf8)) }
+                if let data = try? handle.read(upToCount: 4096) { taskPage = TaskDocument.isTaskPage(String(decoding: data, as: UTF8.self)) }
             }
             return NoteEntry(url: url, isFolder: false, isTaskPage: taskPage)
         }.sorted {
@@ -139,7 +139,7 @@ struct TaskPreferences: Codable, Equatable {
     var completed = "Done"
     func validate() throws {
         guard !statuses.isEmpty, statuses.count <= 12, Set(statuses.map { $0.lowercased() }).count == statuses.count,
-              statuses.allSatisfy({ !$0.isEmpty && $0.count <= 40 && $0 == $0.trimmingCharacters(in: .whitespacesAndNewlines) && !$0.contains(where: { "\n\r<>#".contains($0) }) && $0.lowercased() != "goals" }), statuses.contains(completed)
+              statuses.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 40 && $0 == $0.trimmingCharacters(in: .whitespacesAndNewlines) && !$0.contains(where: { "\n\r<>#".contains($0) }) && $0.lowercased() != "goals" }), statuses.contains(completed)
         else { throw TaskPageError("Use 1–12 unique status names and choose a completed status. ‘Goals’ is reserved.") }
     }
 }
@@ -156,7 +156,8 @@ struct TaskDetails: Codable {
     var status: String?
     var draft: Bool?
     var goals: [String]?
-    var isEmpty: Bool { id == nil && description == nil && due == nil && labels == nil && status == nil && draft == nil && goals == nil }
+    var extra: [String: TaskJSON] = [:]
+    var isEmpty: Bool { id == nil && description == nil && due == nil && labels == nil && status == nil && draft == nil && goals == nil && extra.isEmpty }
     func validate(child: Bool) throws {
         if let id, id.range(of: "^[A-Za-z0-9_-]{1,80}$", options: .regularExpression) == nil { throw TaskPageError("Invalid task identity.") }
         if let description, description.utf16.count > 100_000 { throw TaskPageError("Task descriptions are limited to 100,000 characters.") }
@@ -173,14 +174,93 @@ struct TaskDetails: Codable {
     }
     static func decode(_ json: String, child: Bool) throws -> TaskDetails {
         let data = Data(json.utf8)
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], Set(object.keys).isSubset(of: ["id", "description", "due", "labels", "status", "draft", "goals"]), !object.values.contains(where: { $0 is NSNull }) else { throw TaskPageError("Unknown task details are preserved in source view.") }
+        guard json.utf16.count <= 131_072, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], TaskJSON.safe(object) else { throw TaskPageError("Task metadata is too large, too deeply nested, or uses a number that cannot be preserved exactly.") }
+        guard TaskJSON.uniqueKeys(json) else { throw TaskPageError("Task metadata repeats a JSON field. Keep one value for each field.") }
         let details = try JSONDecoder().decode(TaskDetails.self, from: data); try details.validate(child: child); return details
     }
+
     func markdown(child: Bool, depth: Int? = nil) -> String {
         guard !isEmpty else { return "" }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let json = String(decoding: try! encoder.encode(self), as: UTF8.self).replacingOccurrences(of: "<", with: "\\u003c").replacingOccurrences(of: ">", with: "\\u003e")
         return "\n" + String(repeating: "  ", count: (depth ?? (child ? 1 : 0)) + 1) + "<!-- folio:task " + json + " -->"
+    }
+}
+// Preserve metadata owned by outside editors through every native mutation.
+// This is also compiled on Linux; no Apple UI or persistence types belong here.
+indirect enum TaskJSON: Codable, Equatable {
+    case null, bool(Bool), number(Double), string(String), array([TaskJSON]), object([String: TaskJSON])
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode([TaskJSON].self) { self = .array(v) }
+        else { self = .object(try c.decode([String: TaskJSON].self)) }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .null: try c.encodeNil()
+        case .bool(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .string(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        }
+    }
+    static func uniqueKeys(_ json: String) -> Bool {
+        let source = json as NSString
+        let pattern = #""(?:\\.|[^"\\])*"|[{}\[\]:,]"#
+        let tokens = (try! NSRegularExpression(pattern: pattern)).matches(in: json, range: NSRange(location: 0, length: source.length)).map { source.substring(with: $0.range) }
+        var stack: [Set<String>?] = []
+        for (i, token) in tokens.enumerated() {
+            if token == "{" { stack.append(Set<String>()) }
+            else if token == "[" { stack.append(nil) }
+            else if token == "}" || token == "]" { if !stack.isEmpty { stack.removeLast() } }
+            else if token.hasPrefix("\""), i + 1 < tokens.count, tokens[i + 1] == ":", !stack.isEmpty, var keys = stack[stack.count - 1] {
+                guard let key = try? JSONDecoder().decode(String.self, from: Data(token.utf8)), keys.insert(key).inserted else { return false }
+                stack[stack.count - 1] = keys
+            }
+        }
+        return true
+    }
+    static func safe(_ value: Any, depth: Int = 0) -> Bool {
+        guard depth <= 16 else { return false }
+        if value is NSNull || value is String { return true }
+        if let n = value as? NSNumber { let v = n.doubleValue; return v.isFinite && (v.rounded() != v || abs(v) <= 9_007_199_254_740_991) }
+        if let a = value as? [Any] { return a.allSatisfy { safe($0, depth: depth + 1) } }
+        if let o = value as? [String: Any] { return o.values.allSatisfy { safe($0, depth: depth + 1) } }
+        return false
+    }
+}
+extension TaskDetails {
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ value: String) { stringValue = value }
+        init?(stringValue: String) { self.init(stringValue) }
+        init?(intValue: Int) { return nil }
+    }
+    static let knownKeys: Set<String> = ["id", "description", "due", "labels", "status", "draft", "goals"]
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Key.self)
+        id = try c.decodeIfPresent(String.self, forKey: Key("id"))
+        description = try c.decodeIfPresent(String.self, forKey: Key("description"))
+        due = try c.decodeIfPresent(String.self, forKey: Key("due"))
+        labels = try c.decodeIfPresent([String].self, forKey: Key("labels"))
+        status = try c.decodeIfPresent(String.self, forKey: Key("status"))
+        draft = try c.decodeIfPresent(Bool.self, forKey: Key("draft"))
+        goals = try c.decodeIfPresent([String].self, forKey: Key("goals"))
+        for key in c.allKeys where !Self.knownKeys.contains(key.stringValue) { extra[key.stringValue] = try c.decode(TaskJSON.self, forKey: key) }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        for (key, value) in extra where !Self.knownKeys.contains(key) { try c.encode(value, forKey: Key(key)) }
+        try c.encodeIfPresent(id, forKey: Key("id")); try c.encodeIfPresent(description, forKey: Key("description"))
+        try c.encodeIfPresent(due, forKey: Key("due")); try c.encodeIfPresent(labels, forKey: Key("labels"))
+        try c.encodeIfPresent(status, forKey: Key("status")); try c.encodeIfPresent(draft, forKey: Key("draft")); try c.encodeIfPresent(goals, forKey: Key("goals"))
     }
 }
 struct TaskCheckItem: Codable {
@@ -201,6 +281,9 @@ struct TaskPageItem: Codable {
 }
 struct TaskDocument: Codable {
     static let marker = "<!-- folio:tasks -->"
+    static func isTaskPage(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))).hasPrefix(marker)
+    }
     var title: String
     var statuses: [String]
     var completedStatus: String
@@ -210,35 +293,43 @@ struct TaskDocument: Codable {
         self.title = title; statuses = preferences.statuses; completedStatus = preferences.completed
     }
     init(markdown: String) throws {
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-        guard lines.first == Self.marker else { throw TaskPageError("This note is not a task page.") }
+        let text = markdown.hasPrefix("\u{FEFF}") ? String(markdown.dropFirst()) : markdown
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n").components(separatedBy: "\n")
+        let first = lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard let first, lines[first].trimmingCharacters(in: .whitespaces) == Self.marker else { throw TaskPageError("This note is not a task page.") }
         title = ""; statuses = []; completedStatus = "Done"
         var titleSeen = false, section: String?, seen = Set<String>(), path: [Int] = [], goalIndex: Int?, metadataSeen = false
-        for line in lines.dropFirst() {
+        var index = first + 1
+        while index < lines.count {
+            let lineNumber = index + 1
+            var line = lines[index]; index += 1
+            do {
             if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
-            if !titleSeen && line.hasPrefix("<!-- folio:completed ") && line.hasSuffix(" -->") {
-                let json = String(line.dropFirst(21).dropLast(4))
+            if !titleSeen && line.hasPrefix("<!-- folio:completed ") && line.trimmingCharacters(in: .whitespaces).hasSuffix(" -->") {
+                let json = String(line.trimmingCharacters(in: .whitespaces).dropFirst(21).dropLast(4))
                 guard let value = try? JSONDecoder().decode(String.self, from: Data(json.utf8)) else { throw TaskPageError("Invalid completed-status marker.") }
                 completedStatus = value; continue
             }
             if !titleSeen && line.hasPrefix("# ") { title = String(line.dropFirst(2)); titleSeen = true; continue }
             if titleSeen && line.hasPrefix("## ") {
-                let name = String(line.dropFirst(3)); guard seen.insert(name.lowercased()).inserted else { throw TaskPageError("Duplicate task section.") }
+                let name = String(line.dropFirst(3)); if name != "Goals" { try TaskPreferences(statuses: [name], completed: name).validate() }; guard seen.insert(name.lowercased()).inserted else { throw TaskPageError("Duplicate task section.") }
                 section = name; path = []; goalIndex = nil; if name != "Goals" { statuses.append(name) }; continue
             }
             let spaces = line.prefix(while: { $0 == " " }).count, row = String(line.dropFirst(spaces)), depth = spaces / 2
             guard spaces % 2 == 0, depth <= 33 else { throw TaskPageError("Invalid task indentation.") }
-            if row.hasPrefix("<!-- folio:task ") {
-                guard row.hasSuffix(" -->"), !metadataSeen, depth == (goalIndex == nil ? path.count : 1), depth > 0 else { throw TaskPageError("Invalid task detail placement.") }
+            if row.range(of: #"^<!-- folio:task(?:\s|$)"#, options: .regularExpression) != nil {
+                while !line.trimmingCharacters(in: .whitespaces).hasSuffix("-->") && index < lines.count && line.utf16.count <= 131_072 { line += "\n" + lines[index]; index += 1 }
+                let row = String(line.dropFirst(spaces)).trimmingCharacters(in: .whitespaces)
+                guard row.utf16.count <= 131_072, row.hasSuffix("-->"), !metadataSeen, depth == (goalIndex == nil ? path.count : 1), depth > 0 else { throw TaskPageError("Invalid task detail placement.") }
                 // Keep valid external metadata on goals too. Goal progress
                 // remains based on linked work or its checkbox, not this field.
-                let details = try TaskDetails.decode(String(row.dropFirst(16).dropLast(4)), child: true)
+                let details = try TaskDetails.decode(String(row.dropFirst(15).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines), child: true)
                 if let goalIndex { goals[goalIndex].details = details }
                 else if path.count == 1 { tasks[path[0]].details = details }
                 else { tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { $0.details = details } }
                 metadataSeen = true; continue
             }
-            guard titleSeen, let section, depth <= 32, row.hasPrefix("- ["), row.count >= 5 else { throw TaskPageError("This task page contains extra Markdown. Edit it in source view to preserve that content.") }
+            guard titleSeen, let section, depth <= 32, (row.hasPrefix("- [") || row.hasPrefix("* [") || row.hasPrefix("+ [")), row.count >= 5 else { throw TaskPageError("This task page contains extra Markdown. Edit it in source view to preserve that content.") }
             let chars = Array(row); guard chars[4] == "]", [" ", "x", "X"].contains(String(chars[3])), chars.count == 5 || chars[5] == " " else { throw TaskPageError("Invalid task checkbox.") }
             let text = chars.count > 5 ? String(chars.dropFirst(6)) : "", checked = chars[3] != " "
             metadataSeen = false; goalIndex = nil
@@ -251,6 +342,7 @@ struct TaskDocument: Codable {
                 path.append(index)
             } else if section == "Goals" { goals.append(TaskCheckItem(title: text, completed: checked)); goalIndex = goals.count - 1; path = [] }
             else { tasks.append(TaskPageItem(title: text, status: section)); path = [tasks.count - 1] }
+            } catch { throw TaskPageError("Line \(lineNumber): \(error is DecodingError ? "Invalid task metadata field type." : error.localizedDescription)") }
         }
         guard titleSeen else { throw TaskPageError("Task page needs a title.") }
         if statuses.isEmpty { statuses = TaskPreferences().statuses }

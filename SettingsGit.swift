@@ -105,7 +105,7 @@ struct DocumentToolbar: View {
                 }.help(activity.message == "Outside edits need review" ? "Review the outside changes. Both versions are preserved." : "Updates appear here as they arrive. Highlighted text shows the latest edit.")
                     .accessibilityLabel(activity.message)
             }
-            if !notebook.text.hasPrefix(TaskDocument.marker) {
+            if !TaskDocument.isTaskPage(notebook.text) {
                 if !notebook.documentIsSource {
                     Button { sharing = false; notebook.richEditor?.command("comments") } label: {
                         HStack(spacing: 4 * scale) {
