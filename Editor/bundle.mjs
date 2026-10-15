@@ -8,6 +8,8 @@ const require = createRequire(path.join(runtime, 'package.json'));
 const { build } = require('esbuild');
 const result = await build({ metafile:true, entryPoints:[path.join(here,'editor.js')], outfile:path.join(here,'../Resources/editor.js'),bundle:true,minify:true,format:'iife',target:['safari16.4'],nodePaths:[path.join(runtime,'node_modules')],loader:{'.woff2':'file','.woff':'file','.ttf':'file'},assetNames:'fonts/[name]-[hash]',legalComments:'linked' });
 fs.copyFileSync(path.join(here,'index.html'),path.join(here,'../Resources/index.html'));
+await build({entryPoints:[path.join(here,'folder-tasks.js')],outfile:path.join(here,'../Resources/folder-tasks.js'),bundle:true,minify:true,format:'iife',target:['safari16.4'],nodePaths:[path.join(runtime,'node_modules')],legalComments:'linked'});
+fs.copyFileSync(path.join(here,'folder-tasks.html'),path.join(here,'../Resources/folder-tasks.html'));
 console.log('Bundled the local editor.');
 
 const packages=new Map();

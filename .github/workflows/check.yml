@@ -29,6 +29,9 @@ jobs:
       - run: zsh Tests/check-notebook-migration.sh
       - run: zsh Tests/check-external-edits.sh
       - run: zsh Tests/check-checklists.sh
+      - run: zsh Tests/check-folder-tasks.sh
+      - run: xcrun swiftc -D FOLDER_TASK_CHECK Core.swift Checklist.swift FolderTasks.swift Tests/FolderTasksCheck.swift -o "$RUNNER_TEMP/FolderTasksCheck"
+      - run: '"$RUNNER_TEMP/FolderTasksCheck"'
       - run: xcrun swiftc -parse-as-library Core.swift Recovery.swift UndoHistory.swift Tests/WebTaskCheck.swift -o "$RUNNER_TEMP/WebTaskCheck" -framework AppKit -framework WebKit -lsqlite3
       - run: '"$RUNNER_TEMP/WebTaskCheck" "$PWD/Resources" "$RUNNER_TEMP/tasks.png"'
       - run: xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitSyncCheck.swift -o "$RUNNER_TEMP/GitSyncCheck"

@@ -293,6 +293,7 @@ final class Notebook: ObservableObject {
     private var saveTask: DispatchWorkItem?
     private var timer: Timer?
     private var checking = false
+    weak var folderTasksEditor: FolderTasksBridge?
     weak var richEditor: EditorBridge?
     static let defaultZoom = 1.4
     @Published var zoom = UserDefaults.standard.object(forKey: "documentZoom") as? Double ?? Notebook.defaultZoom
@@ -317,8 +318,12 @@ final class Notebook: ObservableObject {
 
     func afterSync(_ action: @escaping () -> Void) {
         guard !gitSyncing else { return }
-        if let richEditor { richEditor.synchronize { success in if success { action() } } }
-        else { action() }
+        synchronizeEditors { success in if success { action() } }
+    }
+    func synchronizeEditors(_ completion: @escaping (Bool) -> Void) {
+        let selected = { if let editor = self.richEditor { editor.synchronize(completion) } else { completion(true) } }
+        if checklistFolder != nil, let folderTasksEditor { folderTasksEditor.synchronize { success in if success { selected() } else { completion(false) } } }
+        else { selected() }
     }
 
     var count: Int { NoteFiles.flatten(entries).filter { !$0.isFolder }.count }

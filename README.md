@@ -19,7 +19,7 @@ A calm, open-source Markdown notes and tasks app for macOS, with live collaborat
 - Edit ordinary Markdown files in your own folders. Assistant HTML comment markers stay hidden and are preserved when editing. Tables, images, math, slash commands, page links, and a selection toolbar.
 - Organize notebooks with drag-and-drop ordering, folders, favorites, and archives.
 - Find notes with ⌘K, then jump to the matching passage. Open Archive from the icon beside ⌘K in the sidebar footer.
-- In notes, type `/task` for a simple checklist. Click the checklist icon beside a notebook or right-click a folder → **View tasks** for a live list grouped by source note. A full-width header shows overall progress and Open / Done / All filters; source groups collapse individually. Includes subfolders and existing task pages; excludes archived notes and goals. Completing an item updates its original file, with no duplicate task document.
+- In notes, type `/task` for a checklist. Click the checklist icon beside a notebook or right-click a folder → **View tasks** for a complete folder workspace: list and board views, goals linked across pages, custom statuses, task and project progress, descriptions, dates, labels, and nested subtasks. Cards and rows show their source page; search and filter by page, or open the source directly. New work saves to the page you choose. Includes subfolders and task pages; excludes archives. Changes update the original files, with no duplicate task document.
 - Simple task lists and boards, nested subtasks, descriptions, due dates, labels, and linked goals.
 - Manage task statuses and shared pastel labels in Settings (⌘,).
 - Extra task metadata from outside tools is preserved through edits, task moves, MCP changes and current-version live collaboration. Multiline JSON, optional null fields, BOM/blank prefixes, and `*` / `+` checklist bullets are accepted.
@@ -29,6 +29,14 @@ A calm, open-source Markdown notes and tasks app for macOS, with live collaborat
 - Optional Git notebooks with existing GitHub/GitLab CLI login.
 - Live collaboration with named cursors and a [self-hosted, memory-only relay](Relay/README.md).
 - Optional local MCP access for tools such as Claude Code and Codex.
+
+### Folder tasks and source pages
+
+The folder workspace uses the same task interface as task documents. Inline checklist details are stored in an invisible `omega-task` comment on the checklist line; the surrounding Markdown remains in place. Labels use the same settings catalog and pastel colors as task documents. A task can move under another task on its source page, or become a main task, keeping its metadata and descendants. To move whole blocks between notes, use the source documents.
+
+Cross-page goal links store a relative page path and a durable item ID, so the links travel with your Git notebook. Folder progress is calculated from the original tasks and subtasks, not copies. Each task page retains its own status names; its completed status maps to the folder’s completed column. Folder views combine up to 12 distinct workflow statuses.
+
+Before a folder edit is saved, Omega checks the affected files against the versions displayed. Outside changes stop a stale save and show **Copy changes** and **Reload**; the pending proposal is retained locally in `~/Library/Application Support/Omega/Folder task recovery`. Multi-page changes also use per-page backups and undo history. If a write fails after another page was saved, the notice identifies the partial save; reloading displays the actual source files.
 
 ## Writing
 

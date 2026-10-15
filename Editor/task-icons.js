@@ -1,3 +1,3 @@
 // The same bundled Font Awesome Free 5.1 family used throughout Folio.
-const glyphs={promote:'\uf062',link:'\uf0c1',list:'\uf03a',board:'\uf0db',add:'\uf067',close:'\uf00d',chevron:'\uf105',back:'\uf104',subtasks:'\uf0c5',task:'\uf0ae',grip:'\uf142',expand:'\uf065',compress:'\uf066',dock:'\uf2d1',calendar:'\uf073',tag:'\uf02b',goal:'\uf11e',more:'\uf141',trash:'\uf2ed',check:'\uf00c'};
+const glyphs={page:'\uf15b',search:'\uf002',promote:'\uf062',link:'\uf0c1',list:'\uf03a',board:'\uf0db',add:'\uf067',close:'\uf00d',chevron:'\uf105',back:'\uf104',subtasks:'\uf0c5',task:'\uf0ae',grip:'\uf142',expand:'\uf065',compress:'\uf066',dock:'\uf2d1',calendar:'\uf073',tag:'\uf02b',goal:'\uf11e',more:'\uf141',trash:'\uf2ed',check:'\uf00c'};
 export function taskIcon(name){const span=document.createElement('span');span.className='icon task-icon';span.setAttribute('aria-hidden','true');span.textContent=glyphs[name]||glyphs.task;return span;}

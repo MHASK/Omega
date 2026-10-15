@@ -12,9 +12,9 @@ let package = Package(
         .systemLibrary(name: "CSQLite", path: "Portable/CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "OmegaCore", dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux])), .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux]))], path: ".",
                 exclude: ["Editor", "Resources", "Relay", "Website", "Tests", "Portable"],
-                sources: ["Core.swift", "Checklist.swift", "Recovery.swift", "UndoHistory.swift", "GitSync.swift", "GitMerge.swift", "LiveCheckpointStore.swift"]),
+                sources: ["Core.swift", "Checklist.swift", "FolderTasks.swift", "Recovery.swift", "UndoHistory.swift", "GitSync.swift", "GitMerge.swift", "LiveCheckpointStore.swift"]),
         .testTarget(name: "OmegaCoreTests", dependencies: ["OmegaCore"], path: "Tests",
-                    sources: ["PortableCheck.swift", "GitSyncCheck.swift", "GitAutoSyncCheck.swift", "NoteLinkCheck.swift"])
+                    sources: ["PortableCheck.swift", "FolderTasksCheck.swift", "GitSyncCheck.swift", "GitAutoSyncCheck.swift", "NoteLinkCheck.swift"])
     ],
     swiftLanguageModes: [.v5]
 )

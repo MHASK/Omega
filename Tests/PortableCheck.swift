@@ -2,6 +2,7 @@ import XCTest
 @testable import OmegaCore
 
 final class PortableCheck: XCTestCase {
+    func testFolderTasks() throws { try FolderTasksCheck.main() }
     func testGitSynchronization() throws { try GitSyncCheck.main() }
     func testGitDuringEdits() throws { try GitAutoSyncCheck.main() }
     func testLocalLinks() throws { try NoteLinkCheck.main() }

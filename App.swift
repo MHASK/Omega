@@ -129,8 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if notebook.gitSyncing { return .terminateCancel }
         if updating { return .terminateNow }
-        guard let editor = notebook.richEditor else { return notebook.save() ? .terminateNow : .terminateCancel }
-        editor.synchronize { success in sender.reply(toApplicationShouldTerminate: success && self.notebook.save()) }
+        notebook.synchronizeEditors { success in sender.reply(toApplicationShouldTerminate: success && self.notebook.save()) }
         return .terminateLater
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -243,8 +242,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func zoomOut() { notebook.changeZoom(-1) }
     @objc func zoomReset() { notebook.changeZoom(0) }
     @objc func sourceMode() { notebook.richEditor?.command("source") }
-    @objc func undoEdit() { if notebook.showingSettings { NSApp.sendAction(Selector(("undo:")), to: nil, from: self); return }; if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(Selector(("undo:")), to: nil, from: self) } else if !notebook.undoRecentDeletion() { notebook.richEditor?.command("undo") } }
-    @objc func redoEdit() { if notebook.showingSettings { NSApp.sendAction(Selector(("redo:")), to: nil, from: self); return }; if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(Selector(("redo:")), to: nil, from: self) } else { notebook.richEditor?.command("redo") } }
+    @objc func undoEdit() { if notebook.checklistFolder != nil { notebook.folderTasksEditor?.command("undo"); return }; if notebook.showingSettings { NSApp.sendAction(Selector(("undo:")), to: nil, from: self); return }; if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(Selector(("undo:")), to: nil, from: self) } else if !notebook.undoRecentDeletion() { notebook.richEditor?.command("undo") } }
+    @objc func redoEdit() { if notebook.checklistFolder != nil { notebook.folderTasksEditor?.command("redo"); return }; if notebook.showingSettings { NSApp.sendAction(Selector(("redo:")), to: nil, from: self); return }; if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(Selector(("redo:")), to: nil, from: self) } else { notebook.richEditor?.command("redo") } }
     @objc func restoreDeleted() { notebook.restoreLastDeleted() }
     @objc func openFile() { notebook.chooseFile() }
     @objc func openFolder() { notebook.chooseFolder() }
@@ -260,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func heading() { notebook.format("## ") }
     @objc func checklist() { notebook.format("- [ ] ") }
     @objc func search() { NotificationCenter.default.post(name: .init("FolioSearch"), object: nil) }
-    @objc func findInNote() { notebook.richEditor?.command("find") }
+    @objc func findInNote() { if notebook.checklistFolder != nil { notebook.folderTasksEditor?.command("find") } else { notebook.richEditor?.command("find") } }
     func startAssistantServer() {
         guard UserDefaults.standard.bool(forKey: "assistantAccess") else { return }
         do { assistantServer = try AssistantServer(notebook: notebook) }
@@ -268,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if notebook.checklistFolder != nil {
-            let editorActions: [Selector] = [#selector(rename), #selector(sourceMode), #selector(findInNote), #selector(reading), #selector(bold), #selector(italic), #selector(heading), #selector(checklist), #selector(underline), #selector(addComment), #selector(undoEdit), #selector(redoEdit), #selector(writingLarger), #selector(writingSmaller), #selector(writingReset)]
+            let editorActions: [Selector] = [#selector(rename), #selector(sourceMode), #selector(reading), #selector(bold), #selector(italic), #selector(heading), #selector(checklist), #selector(underline), #selector(addComment), #selector(writingLarger), #selector(writingSmaller), #selector(writingReset)]
             if editorActions.contains(where: { $0 == item.action }) { return false }
         }
         guard notebook.showingSettings else { return true }

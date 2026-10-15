@@ -31,6 +31,8 @@ struct LabelPage {
     let file: URL
     let source: String
     var document: TaskDocument
+    var inline: InlineTaskDocument? = nil
+    func rendered() throws -> String { try inline.map { try $0.render(document) } ?? document.markdown }
 }
 enum TaskLabelCatalog {
     // Scan disk afresh, including archived work. Never follow symlinks or silently
@@ -46,14 +48,13 @@ enum TaskLabelCatalog {
                 guard values.isSymbolicLink != true else { continue }
                 if values.isDirectory == true { try scan(url); continue }
                 guard values.isRegularFile == true, NoteFiles.extensions.contains(url.pathExtension.lowercased()), seen.insert(url.resolvingSymlinksInPath().path).inserted else { continue }
-                let handle = try FileHandle(forReadingFrom: url)
-                let prefix: Data
-                do { prefix = try handle.read(upToCount: 64) ?? Data(); try handle.close() } catch { try? handle.close(); throw error }
-                guard prefix.starts(with: Data(TaskDocument.marker.utf8)) else { continue }
                 guard (values.fileSize ?? 0) <= 8_000_000 else { throw TaskPageError("‘\(url.lastPathComponent)’ is too large to update safely.") }
                 let source = try String(contentsOf: url, encoding: .utf8)
-                do { result.append(LabelPage(file: url, source: source, document: try TaskDocument(markdown: source))) }
-                catch { throw TaskPageError("‘\(url.lastPathComponent)’ has task formatting Omega cannot safely edit. Check that page before managing labels.") }
+                guard TaskDocument.isTaskPage(source) || source.contains("<!-- omega-task:") else { continue }
+                do {
+                    let page = try FolderTaskSource(url: url, text: source, preferences: TaskPreferences())
+                    result.append(LabelPage(file: url, source: source, document: page.document, inline: page.inline))
+                } catch { throw TaskPageError("‘\(url.lastPathComponent)’ has task formatting Omega cannot safely edit. Check that page before managing labels.") }
             }
         }
         for root in roots { try scan(root) }
@@ -111,10 +112,11 @@ extension TaskDocument {
                 if let next, LabelPastel.key(label) != LabelPastel.key(next), TaskLabelCatalog.labels(in: pages).contains(where: { $0.id == LabelPastel.key(next) }) {
                     throw TaskPageError("A label named ‘\(next.uppercased())’ already exists. Choose another name.")
                 }
-                let changes: [(URL, String, String)] = pages.compactMap { page in
-                    var document = page.document
-                    guard document.replaceLabel(label, with: next) > 0, document.markdown != page.source else { return nil }
-                    return (page.file, page.source, document.markdown)
+                let changes: [(URL, String, String)] = try pages.compactMap { page in
+                    var page = page
+                    guard page.document.replaceLabel(label, with: next) > 0 else { return nil }
+                    let after = try page.rendered()
+                    return after == page.source ? nil : (page.file, page.source, after)
                 }
                 // Establish the new color before changing files, so even an interrupted
                 // multi-page rename has the same appearance under both names.

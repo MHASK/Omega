@@ -476,3 +476,14 @@ runSourceCommentTests();
  a.destroy();b.destroy();
  console.log('PASS: opaque task/goal metadata survives concurrent edits, separate-key merges, and Markdown projection.');
 }
+
+// Folder-only task details stay invisible and survive normal note editing.
+const inlineTaskText='# Notes\n\nKeep this paragraph.\n\n- [ ] Research <!-- omega-task: {"id":"inline-a","status":"In progress","description":"Keep **this**","labels":["research"]} -->\n  - [x] Ask a friend\n\n| Name | Value |\n| --- | --- |\n| Keep | exact |\n';
+assert(!needsSource(inlineTaskText),'Inline task records must not force Markdown mode');
+const inlineTaskEditor=new Editor({element:document.createElement('div'),extensions:extensions(),content:inlineTaskText,contentType:'markdown'});
+assert(!inlineTaskEditor.getText().includes('omega-task'),'Task metadata is hidden in the document');
+const inlineTaskSaved=inlineTaskEditor.getMarkdown();
+assert(inlineTaskSaved.includes('<!-- omega-task: {"id":"inline-a","status":"In progress","description":"Keep **this**","labels":["research"]} -->'),'Rich editing preserves task metadata');
+assert(inlineTaskSaved.includes('- [x] Ask a friend')&&inlineTaskSaved.includes('| Keep | exact |'));
+inlineTaskEditor.destroy();
+console.log('PASS: inline folder task metadata stays hidden and survives rich note editing.');
