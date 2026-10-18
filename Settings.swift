@@ -269,6 +269,7 @@ struct FolioSettingsView: View {
                 Toggle("Allow assistant access", isOn: Binding(get: { assistantEnabled }, set: { (NSApp.delegate as? AppDelegate)?.setAssistantAccess($0) })).toggleStyle(.switch)
                 Text(assistantEnabled ? "Access is on. Connected assistants can work with notes, tasks, subtasks, goals, and their links." : "Access is off. Your notes stay available to you in Omega.").font(.system(size: 11 * scale)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
             }
+            AgentWorkflowSettings(notebook: notebook, scale: scale)
             card("Connect an assistant", subtitle: "Add Omega’s local MCP configuration to your assistant client, then reconnect the client.") {
                 Button(copied ? "Configuration copied" : "Copy MCP configuration") {
                     let config: [String: Any] = ["mcpServers": ["folio": ["command": Bundle.main.executableURL!.path, "args": ["--mcp"]]]]

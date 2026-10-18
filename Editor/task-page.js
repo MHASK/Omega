@@ -1,3 +1,4 @@
+import {workGraph,workBadge,coordinationPanel} from './task-coordination.js';
 import {labelChip,applyLabelTone} from './task-labels.js';
 import {completionRing,projectCompletion,taskCompletion,taskCompletionRing} from './completion-ring.js';
 import {goalPicker,goalBadge,renderGoals,renderGoal} from './task-goals.js';
@@ -28,7 +29,7 @@ export class TaskPage {
   this.render();return true;
  }
  navigationState(){const scroll=this.element.querySelector('.tasks-body,.task-detail-scroller');return {view:this.view,detail:this.detail,goal:this.goalView,collapsed:[...this.collapsed],expanded:[...this.expandedList],groups:[...this.collapsedGroups],top:scroll?.scrollTop||0,left:this.element.querySelector('.board')?.scrollLeft||0,savedScroll:this.savedScroll||0};}
- restoreNavigation(state){this.view=state.view==='board'?'board':'list';this.detail=this.lookup(state.detail)?state.detail:null;this.goalView=state.goal==='all'||this.model.goals.some(g=>g.id===state.goal)?state.goal:null;this.collapsed=new Set(state.collapsed||[]);this.expandedList=new Set(state.expanded||[]);this.collapsedGroups=new Set(state.groups||[]);this.savedScroll=state.savedScroll||0;this.render();const scroll=this.element.querySelector('.tasks-body,.task-detail-scroller');if(scroll)scroll.scrollTop=state.top||0;const board=this.element.querySelector('.board');if(board)board.scrollLeft=state.left||0;}
+ restoreNavigation(state){this.view=['board','ready'].includes(state.view)?state.view:'list';this.detail=this.lookup(state.detail)?state.detail:null;this.goalView=state.goal==='all'||this.model.goals.some(g=>g.id===state.goal)?state.goal:null;this.collapsed=new Set(state.collapsed||[]);this.expandedList=new Set(state.expanded||[]);this.collapsedGroups=new Set(state.groups||[]);this.savedScroll=state.savedScroll||0;this.render();const scroll=this.element.querySelector('.tasks-body,.task-detail-scroller');if(scroll)scroll.scrollTop=state.top||0;const board=this.element.querySelector('.board');if(board)board.scrollLeft=state.left||0;}
  lookup(id){return this.model?walkTasks(this.model).find(e=>e.item.id===id)||null:null;}
  reference(ref){if(ref.startsWith('g:'))return this.model.goals[Number(ref.slice(2))];let item;for(const [depth,index] of ref.slice(2).split('.').map(Number).entries())item=(depth?item?.children:this.model.tasks)?.[index];return item;}
  promote(item){this.reparent(item,null);}
@@ -65,6 +66,7 @@ export class TaskPage {
  render(){
   this.descriptions.forEach(editor=>editor.destroy());this.descriptions=[];this.description=null;this.popovers.forEach(close=>close());this.popovers=[];
   const root=this.element;root.replaceChildren();if(!this.model)return;
+  this.workGraph=workGraph(this.model);
   if(this.goalView&&this.goalView!=='all'&&!this.model.goals.some(g=>g.id===this.goalView))this.goalView='all';
   const content=el('div','task-content');root.append(content);
   if(this.goalView==='all')renderGoals(this,content);else if(this.goalView)renderGoal(this,content,this.model.goals.find(g=>g.id===this.goalView));else if(this.detail&&this.lookup(this.detail))this.renderDetail(content);else this.renderOverview(content);
@@ -75,10 +77,11 @@ export class TaskPage {
   const header=el('header','tasks-header'),heading=el('div','tasks-heading'),p=projectCompletion(this.model),ring=completionRing(p.completed,p.total,{label:p.label});ring.classList.add('tasks-page-progress');
   this.options.heading?.(heading);heading.append(ring,this.options.readOnlyTitle?el('span','tasks-title',this.model.title):this.textField(this.model,'title','Task page title','tasks-title',()=>this.change(false,true)));header.append(heading);
   const controls=el('div','tasks-controls'),tabs=el('div','tasks-tabs');tabs.setAttribute('role','tablist');
-  for(const view of ['list','board']){const tab=button(view==='list'?'List':'Board',view==='list'?'List view':'Board view',()=>this.setView(view),this.view===view?'active':'',view);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(this.view===view));tabs.append(tab);}
+  for(const view of ['list','board','ready']){const title=view==='ready'?'Ready':view==='list'?'List':'Board';const tab=button(title,title+' view',()=>this.setView(view),this.view===view?'active':'',view==='ready'?'check':view);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(this.view===view));tabs.append(tab);}
   const actions=el('div','tasks-actions');actions.append(button('Goals'+(this.model.goals.length?' · '+this.model.goals.length:''),'Manage goals',()=>this.openGoals(),'task-goals-trigger','goal'));this.addMenu(actions);controls.append(tabs,actions);header.append(controls);root.append(header);
-  const body=el('div','tasks-body'+(this.view==='list'?' tasks-list-body':''));root.append(body);root=body;
+  const body=el('div','tasks-body'+(this.view!=='board'?' tasks-list-body':''));root.append(body);root=body;
   if(!this.model.tasks.length){const empty=el('section','task-page-empty');empty.append(taskIcon('task'),el('h2','','No tasks yet'),el('p','',this.model.goals.length?'Turn your goal into a few small steps.':'Start with one thing you’d like to get done.'),formControl(button('Add your first task','Add your first task',()=>this.addTask(),'task-empty-action','add')));root.append(empty);return;}
+  if(this.view==='ready'){this.renderReady(root);return;}
   if(this.view==='list'){this.renderList(root);return;}
   const groups=el('div','task-groups '+this.view);groups.style.setProperty('--status-count',this.model.statuses.length);
   this.model.statuses.forEach((status,index)=>{
@@ -101,6 +104,13 @@ export class TaskPage {
    if(!parents.length&&!children.length)group.append(el('p','task-lane-empty',status===this.model.completed?'Completed tasks will appear here.':'No tasks here yet.'));
    group.append(formControl(button('Create task','Create task in '+status,()=>this.addTask(index),'task-create-row','add')));groups.append(group);
   });root.append(groups);
+ }
+ renderReady(root){
+  const group=el('section','task-group task-ready-group'),entries=walkTasks(this.model).filter(e=>this.workGraph(e.item).ready);
+  group.append(el('div','task-group-heading',`Ready to start · ${entries.length}`),el('p','task-ready-hint','Unassigned tasks in the first open status, with every dependency complete.'));
+  const rows=el('div','task-list-rows');for(const {item,parent} of entries)rows.append(this.listRow(item,parent,0));group.append(rows);
+  if(!entries.length)group.append(el('p','task-lane-empty','Nothing ready. Finish blockers or release assigned work to make it available.'));
+  root.append(group);
  }
  // The list is its own compact hierarchy; board cards keep their independent layout.
  renderList(root){
@@ -134,7 +144,7 @@ export class TaskPage {
   leading.append(this.check(done,parent?'Complete subtask':'Complete task',v=>this.move(item,v?doneStatus(this.model):firstOpen(this.model),parent)));row.append(leading);
   const title=button(item.title||'Untitled task',`Open ${parent?'subtask':'task'}: ${item.title||'Untitled task'}`,()=>this.openDetail(item),'task-card-title task-row-title');title.title=item.title||'Untitled task';row.append(title);const source=this.options.sourceBadge?.(item);if(source)row.append(source);
   const progress=el('div','task-row-progress');if(item.children.length){const p=taskCompletion(this.model,item,parent),toggle=button(`${p.completed}/${p.total}`,p.label,()=>this.toggleList(item),'task-row-progress-button');toggle.prepend(taskCompletionRing(this.model,item,parent,true));toggle.setAttribute('aria-expanded',String(this.expandedList.has(item.id)));progress.append(toggle);}else progress.append(taskCompletionRing(this.model,item,parent));if(item.details?.draft)progress.append(el('span','task-draft-badge','Draft'));row.append(progress);
-  const labels=el('div','task-row-labels');const badge=goalBadge(this,item);if(badge)labels.append(badge);for(const name of(item.details?.labels||[]).slice(0,2)){labels.append(labelChip(name));}if(item.details?.labels?.length>2){const extra=el('span','task-label task-label-overflow','+'+(item.details.labels.length-2));extra.title=item.details.labels.slice(2).join(', ');labels.append(extra);}row.append(labels);
+  const labels=el('div','task-row-labels');const work=workBadge(this,item);if(work)labels.append(work);const badge=goalBadge(this,item);if(badge)labels.append(badge);for(const name of(item.details?.labels||[]).slice(0,2)){labels.append(labelChip(name));}if(item.details?.labels?.length>2){const extra=el('span','task-label task-label-overflow','+'+(item.details.labels.length-2));extra.title=item.details.labels.slice(2).join(', ');labels.append(extra);}row.append(labels);
   const due=el('span','task-row-date');if(item.details?.due){due.append(taskIcon('calendar'),el('span','',this.dateLabel(item.details.due)));due.title=item.details.due;}row.append(due);
   const state=el('div','task-row-state');state.append(el('span','task-status-dot'+(done?' is-done':status===firstOpen(this.model)?'':' is-active')));const select=this.statusSelect(item,parent);select.title=this.model.statuses[status];state.append(select);row.append(state,button('','Open task details',()=>this.openDetail(item),'task-quiet-action task-row-more','more'));
   row.onkeydown=e=>{if(e.target!==title&&!e.target.classList.contains('task-row-disclosure'))return;if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const titles=[...this.element.querySelectorAll('.task-row-title')],index=titles.indexOf(title);titles[Math.max(0,Math.min(titles.length-1,index+(e.key==='ArrowDown'?1:-1)))]?.focus();}else if(e.key==='ArrowRight'&&item.children.length&&!this.expandedList.has(item.id)){e.preventDefault();this.toggleList(item);}else if(e.key==='ArrowLeft'){if(this.expandedList.has(item.id)){e.preventDefault();this.toggleList(item);}else if(parent){e.preventDefault();[...this.element.querySelectorAll('.task-list-row')].find(r=>r.dataset.task===parent.id)?.querySelector('.task-row-title')?.focus();}}};
@@ -152,6 +162,7 @@ export class TaskPage {
   if(item.details?.due){const due=el('span','task-date');due.append(taskIcon('calendar'),el('span','',this.dateLabel(item.details.due)));due.title=item.details.due;meta.append(due);}
   if(item.children.length){const p=taskCompletion(this.model,item,parent),toggle=button(`${p.completed}/${p.total}`,p.label+' · Show subtasks',()=>{this.collapsed.has(item.id)?this.collapsed.delete(item.id):this.collapsed.add(item.id);this.render();},'task-progress');toggle.prepend(taskCompletionRing(this.model,item,parent,true));toggle.setAttribute('aria-expanded',String(!this.collapsed.has(item.id)));meta.append(toggle);}else{const progress=el('span','task-progress');progress.append(taskCompletionRing(this.model,item,parent));meta.append(progress);}
   if(this.view==='list')meta.append(this.statusSelect(item,parent));
+  const work=workBadge(this,item);if(work)meta.prepend(work);
   meta.append(button('','Open task details',()=>this.openDetail(item),'task-quiet-action task-more','more'));card.append(meta);return card;
  }
  dateLabel(date){const d=new Date(date+'T12:00:00');return isNaN(d)?date:d.toLocaleDateString(undefined,{month:'short',day:'numeric'});}
@@ -214,6 +225,7 @@ export class TaskPage {
   const props=el('div','task-detail-properties');
   this.addProperties(props,item,parent,()=>{this.touch(item);this.change(false,true);});detail.append(props);
   const description=el('div','task-description-section');description.append(el('div','task-section-label','Description'),this.descriptionField(item,()=>{this.touch(item);this.change(false,true);}),el('p','task-field-hint','Type / to link a task, goal, or page.'));detail.append(description);
+  detail.append(coordinationPanel(this,item));
   {const section=el('section','task-detail-children');const head=el('div','task-section-heading'),label=el('span','task-section-label task-subtasks-label','Subtasks');if(item.children.length){const p=taskCompletion(this.model,item,parent);label.append(taskCompletionRing(this.model,item,parent),el('span','',`${p.completed}/${p.total}`));}head.append(label,formControl(button('Add subtask','Add subtask',()=>this.addChild(item),'','add')));section.append(head);
    for(const child of item.children){const row=el('div','task-detail-child');row.append(this.check(subtaskStatus(this.model,child)===doneStatus(this.model),'Complete subtask',v=>this.move(child,v?doneStatus(this.model):firstOpen(this.model),item)),taskIcon('subtasks'),button(child.title||'Untitled subtask','Open subtask: '+(child.title||'Untitled subtask'),()=>this.openDetail(child),'task-child-title'),this.statusSelect(child,item));section.append(row);}
    if(!item.children.length){const empty=el('div','task-subtasks-empty');empty.append(taskIcon('subtasks'),el('p','','No subtasks yet'),el('span','','Break this task into a few smaller steps.'));section.append(empty);}detail.append(section);

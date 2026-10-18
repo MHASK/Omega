@@ -159,6 +159,7 @@ struct TaskDetails: Codable {
     var extra: [String: TaskJSON] = [:]
     var isEmpty: Bool { id == nil && description == nil && due == nil && labels == nil && status == nil && draft == nil && goals == nil && extra.isEmpty }
     func validate(child: Bool) throws {
+        try TaskCoordination.validate(self)
         if let id, id.range(of: "^[A-Za-z0-9_-]{1,80}$", options: .regularExpression) == nil { throw TaskPageError("Invalid task identity.") }
         if let description, description.utf16.count > 100_000 { throw TaskPageError("Task descriptions are limited to 100,000 characters.") }
         if let due {

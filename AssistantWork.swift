@@ -1,0 +1,158 @@
+import Foundation
+
+extension FolioMCP {
+    static let workMutationNames: Set<String> = ["set_task_dependencies", "configure_task_work", "claim_task", "release_task", "handoff_task", "ensure_task_identity"]
+    static let workFields: [String: Any] = [
+        "assignee": property("Person or agent responsible. Empty clears. Up to 200 characters."),
+        "blocker": property("What is preventing progress. Empty clears."),
+        "handoff": property("Persistent summary: decisions, completed work, tests, and next steps. Up to 12,000 characters."),
+        "repository": property("Repository reference; Omega never executes it."), "branch": property("Branch managed by the coding agent."),
+        "session": property("Agent session reference."), "pull_request": property("PR link."),
+        "needs_review": property("Work is ready for human review, not yet completed.", type: "boolean"),
+        "claim_token": property("Receipt returned by claim_task. Required to change claimed coordination fields or release a claim.")
+    ]
+    static var workTools: [[String: Any]] {
+        let target: [String: Any] = ["path": path, "expected_revision": version, "reference": reference]
+        return [
+            tool("read_work_queue", "Read tasks and inline checklists under a notebook/folder, with dependency state, handoffs and source revisions. ready excludes blocked, claimed, assigned, draft, review and already-started work. Unavailable dependencies stay blocked. Inspect warnings before taking work.", ["path": path, "state": property("Optional ready, blocked, claimed, assigned, working, review, done or draft filter.")], required: ["path"]),
+            tool("ensure_task_identity", "Give a task a durable ID before another page links it. Works on task pages and inline checklists. Re-read after a conflict.", target, required: ["path", "expected_revision", "reference"], readOnly: false),
+            tool("set_task_dependencies", "Replace blocked-by dependencies; rejects cycles and unresolved targets. Each entry is a relative note path followed by # and a durable task ID, e.g. Plan.md#task-id. Use ensure_task_identity for legacy targets. Empty array clears.", target.merging(["dependencies": ["type": "array", "items": ["type": "string"], "maxItems": 32], "claim_token": workFields["claim_token"]!]) { _, n in n }, required: ["path", "expected_revision", "reference", "dependencies"], readOnly: false),
+            tool("configure_task_work", "Set assignment, blocker, handoff and execution references. Omega never starts agents or changes worktrees. Existing claims require their receipt.", target.merging(workFields) { _, n in n }, required: ["path", "expected_revision", "reference"], readOnly: false),
+            tool("claim_task", "Exclusively claim a Ready task through this Mac's Omega service. Returns a claim receipt; keep it for handoff/release. Claims do not expire automatically. Git/live notebooks require a single designated Mac; configure it in Omega's agent setup first. Never assume a timed-out claim failed: read the task before retrying.", target.merging(["owner": property("Unique agent/session label, e.g. Claude / auth-fix. Up to 200 characters.")]) { _, n in n }, required: ["path", "expected_revision", "reference", "owner"], readOnly: false),
+            tool("release_task", "Release a claim using its receipt. Clears assignment; does not change task completion or erase the handoff. Read again before starting another task.", target.merging(["claim_token": workFields["claim_token"]!]) { _, n in n }, required: ["path", "expected_revision", "reference", "claim_token"], readOnly: false),
+            tool("handoff_task", "Save a persistent handoff and release the claim. Defaults to needs_review=true; it never marks work completed. Set needs_review=false for unfinished work being handed to another agent.", target.merging(workFields) { _, n in n }, required: ["path", "expected_revision", "reference", "claim_token", "handoff"], readOnly: false)
+        ]
+    }
+    static func callFromCLI(_ name: String) -> Int32 {
+        do {
+            let input = FileHandle.standardInput.readDataToEndOfFile()
+            guard input.count < AssistantWire.maximum, let args = try JSONSerialization.jsonObject(with: input) as? [String: Any] else { throw AssistantError("Pass a JSON object on stdin.") }
+            let fd = try AssistantWire.connect(); defer { close(fd) }
+            try AssistantWire.write(AssistantWire.json(["name": name, "arguments": args, "clientName": "Omega agent CLI"]), to: fd)
+            let result = try AssistantWire.read(fd); FileHandle.standardOutput.write(result + Data([10]))
+            return ((try JSONSerialization.jsonObject(with: result)) as? [String: Any])?["isError"] as? Bool == true ? 1 : 0
+        } catch { FileHandle.standardOutput.write(AssistantWire.json(failure(error.localizedDescription)) + Data([10])); return 1 }
+    }
+}
+
+@MainActor extension AssistantService {
+    func workSnapshot(_ root: URL, replacing: (URL, String)? = nil) throws -> (FolderTaskSnapshot, [String]) {
+        let all = NoteFiles.flatten(try NoteFiles.scan(root)).filter { !$0.isFolder && !notebook.isArchived($0.url) }
+        guard all.count <= 1500 else { throw AssistantError("Choose a smaller folder: the work queue supports up to 1,500 source pages.") }
+        var sources: [FolderTaskSource] = [], warnings: [String] = []
+        for entry in all {
+            do {
+                let url = try resolve(entry.url.path, folder: false)
+                let text = replacing?.0 == url ? replacing!.1 : try String(contentsOf: url, encoding: .utf8)
+                guard text.utf8.count <= 8_000_000 else { throw AssistantError("File exceeds 8 MB") }
+                let source = try FolderTaskSource(url: url, text: text, preferences: notebook.taskPreferences)
+                if !source.document.references.isEmpty { sources.append(source) }
+            } catch { warnings.append(entry.url.lastPathComponent + ": " + error.localizedDescription) }
+        }
+        return (try FolderTaskSnapshot(folder: root, sources: sources, preferences: notebook.taskPreferences), warnings)
+    }
+    func workQueue(_ args: [String: Any]) throws -> [String: Any] {
+        let root = try resolve(args["path"] as! String, folder: true), (snapshot, warnings) = try workSnapshot(root)
+        let allowed = ["ready", "blocked", "claimed", "assigned", "working", "review", "done", "draft"]
+        if let state = args["state"] as? String, !allowed.contains(state) { throw AssistantError("Unknown work state.") }
+        let graph = TaskCoordination.Graph(snapshot.document)
+        var rows: [[String: Any]] = []
+        for ref in snapshot.document.references where ref.kind != "goal" {
+            let state = graph.state(ref)
+            if let filter = args["state"] as? String, state != filter { continue }
+            let source = snapshot.sources.first { $0.key == FolderTaskSnapshot.string(ref.details.extra["_folderSource"]) }!
+            let id = FolderTaskSnapshot.string(ref.details.extra["_folderID"])!
+            let original = source.document.references.first { ($0.details.id ?? FolderTaskSnapshot.legacyID(source.key, $0.reference)) == id }!
+            var row: [String: Any] = ["path": source.url.path, "revision": AssistantWire.hash(source.text), "reference": original.reference, "id": id, "durable_id": source.persistedIDs.contains(id), "title": ref.title, "status": original.status ?? "", "state": state, "details": try JSONSerialization.jsonObject(with: JSONEncoder().encode(original.details))]
+            row["claim_scope"] = "Single designated Omega Mac; all claiming agents must use this authority."
+            rows.append(row)
+        }
+        return ["tasks": rows, "warnings": warnings, "folder": root.path]
+    }
+    func requireClaimAuthority(_ url: URL) throws {
+        // A Git replica cannot issue independent offline claims. A deliberately
+        // configured coordinator is the only Mac allowed to claim shared tasks.
+        var parent = url.deletingLastPathComponent(), git = false
+        while parent.path != "/" {
+            if FileManager.default.fileExists(atPath: parent.appendingPathComponent(".git").path) { git = true; break }
+            parent.deleteLastPathComponent()
+        }
+        let live = LiveCollaboration.shared.configurations.contains { $0.enabled && url.path.hasPrefix($0.folder + "/") }
+        guard git || live else { return }
+        guard let root = notebook.owner(of: url),
+              let data = try? Data(contentsOf: root.appendingPathComponent(".omega/coordination.json")),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["authority"] as? String == AgentSetup.authority else {
+            throw AssistantError("This is a shared notebook. In Settings → Assistants, designate one Mac as its task coordinator. All claiming agents must connect to that Mac; offline replicas cannot issue exclusive claims.")
+        }
+    }
+    func mutateWork(_ name: String, _ args: [String: Any], completion: @escaping ([String: Any]) -> Void) throws {
+        let url = try resolve(args["path"] as! String, folder: false); try checkRevision(url, args)
+        guard !notebook.isArchived(url) else { throw AssistantError("Restore this page before assigning work.") }
+        let text = try String(contentsOf: url, encoding: .utf8), source = try FolderTaskSource(url: url, text: text, preferences: notebook.taskPreferences)
+        var document = source.document
+        let reference = args["reference"] as! String
+        guard let ref = document.references.first(where: { $0.reference == reference && $0.kind != "goal" }) else { throw AssistantError("Choose a task from a fresh work queue.") }
+        if let claim = TaskCoordination.claim(ref.details), name != "claim_task", name != "ensure_task_identity" {
+            guard let token = args["claim_token"] as? String, token == FolderTaskSnapshot.string(claim["token"]) else { throw AssistantError("This task is claimed. Supply its claim receipt or ask the owner to hand it off.") }
+            try requireClaimAuthority(url)
+        }
+        let id = try document.ensureLinkID(reference)
+        var receipt: String?
+        if name == "claim_task" {
+            try requireClaimAuthority(url)
+            let root = notebook.owner(of: url)!, (snapshot, warnings) = try workSnapshot(root)
+            guard warnings.isEmpty else { throw AssistantError("Some source pages could not be read. Fix them before claiming work: " + warnings[0]) }
+            let virtual = FolderTaskSnapshot.identity(source.key, ref.details.id ?? FolderTaskSnapshot.legacyID(source.key, reference))
+            guard let aggregate = snapshot.document.references.first(where: { $0.details.id == virtual }), TaskCoordination.state(aggregate, in: snapshot.document) == "ready" else { throw AssistantError("This task is not Ready. It may be blocked, assigned, claimed, in review, or complete. Refresh the work queue.") }
+            let owner = (args["owner"] as! String).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !owner.isEmpty && owner.utf16.count <= 200 else { throw AssistantError("Use a person or agent/session name of 1–200 characters.") }
+            receipt = UUID().uuidString.lowercased()
+            try document.updateDetails(reference) { d in
+                d.extra["omegaAssignee"] = .string(owner)
+                d.extra["omegaClaim"] = .object(["owner": .string(owner), "token": .string(receipt!), "at": .string(ISO8601DateFormatter().string(from: Date()))])
+            }
+        } else if name == "set_task_dependencies" {
+            var dependencies: [TaskJSON] = []
+            for link in args["dependencies"] as! [String] {
+                guard let hash = link.lastIndex(of: "#") else { throw AssistantError("Use relative-page.md#task-id for each dependency.") }
+                let path = String(link[..<hash]), targetID = String(link[link.index(after: hash)...])
+                guard !path.hasPrefix("/"), !path.contains("\\"), !path.isEmpty else { throw AssistantError("Use a relative page path.") }
+                let targetURL = try resolve(url.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL.path, folder: false)
+                guard notebook.owner(of: targetURL) == notebook.owner(of: url), !notebook.isArchived(targetURL) else { throw AssistantError("Dependencies must be in the same notebook and not archived.") }
+                let target = try FolderTaskSource(url: targetURL, text: String(contentsOf: targetURL, encoding: .utf8), preferences: notebook.taskPreferences)
+                guard target.persistedIDs.contains(targetID), target.document.references.contains(where: { $0.details.id == targetID && $0.kind != "goal" }) else { throw AssistantError("Dependency not found or missing a durable ID. Use ensure_task_identity first.") }
+                var dep: [String: TaskJSON] = ["id": .string(targetID)]
+                if targetURL != url { dep["path"] = .string(FolderTaskSnapshot.relative(targetURL, from: url.deletingLastPathComponent())) }
+                dependencies.append(.object(dep))
+            }
+            try document.updateDetails(reference) { $0.extra["omegaDependencies"] = dependencies.isEmpty ? nil : .array(dependencies) }
+        } else if name != "ensure_task_identity" {
+            if name == "release_task" || name == "handoff_task" {
+                guard TaskCoordination.claim(ref.details) != nil else { throw AssistantError("There is no active claim to release.") }
+            }
+            let fields = ["assignee": "omegaAssignee", "blocker": "omegaBlocker", "handoff": "omegaHandoff", "repository": "omegaRepository", "branch": "omegaBranch", "session": "omegaSession", "pull_request": "omegaPR"]
+            try document.updateDetails(reference) { d in
+                for (key, meta) in fields { if let value = args[key] as? String { d.extra[meta] = value.isEmpty ? nil : .string(value) } }
+                if let review = args["needs_review"] as? Bool { d.extra["omegaReview"] = review ? .bool(true) : nil }
+                if name == "release_task" || name == "handoff_task" { d.extra.removeValue(forKey: "omegaClaim"); d.extra.removeValue(forKey: "omegaAssignee") }
+                if name == "handoff_task" { d.extra["omegaReview"] = args["needs_review"] as? Bool == false ? nil : .bool(true) }
+            }
+        }
+        for ref in document.references { try ref.details.validate(child: ref.kind != "task") }
+        let next = try source.inline.map { try $0.render(document, persisting: [id]) } ?? document.markdown
+        if name == "set_task_dependencies" {
+            let (snapshot, warnings) = try workSnapshot(notebook.owner(of: url)!, replacing: (url, next))
+            guard warnings.isEmpty else { throw AssistantError("Fix unreadable task pages before changing dependencies: " + warnings[0]) }
+            try TaskCoordination.rejectCycles(snapshot.document)
+        }
+        try update(["path": url.path, "expected_revision": args["expected_revision"]!, "markdown": next]) { response in
+            if response["isError"] as? Bool == true { completion(response); return }
+            do {
+                var result = try self.taskPage(url); result["item_id"] = id
+                if let receipt { result["claim_token"] = receipt }
+                completion(FolioMCP.success(result))
+            } catch { completion(FolioMCP.failure(error.localizedDescription)) }
+        }
+    }
+}

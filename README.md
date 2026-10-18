@@ -86,6 +86,67 @@ Open notes update as writes arrive. MCP clients identify themselves during conne
 
 Omega watches the open file, including atomic file replacements, and keeps a periodic fallback check. Direct filesystem updates must remain unchanged for a short interval before display, avoiding partial-file flashes during chunked writes. Independent outside edits merge with unsaved typing; overlapping edits retain the local recovery copy and the outside file, with a review indicator instead of an automatic interruption. Updates wait while an editing dialog or text composition is active.
 
+## Agent planning and Beads migration (in development)
+
+Omega keeps the shared plan; Claude Code and Codex manage their own worktrees,
+branches, sessions and tests. Task pages and folder task views now have a **Ready**
+tab and a compact **Work & handoff** section for assignment, prerequisites,
+blockers, review notes, and repository/branch/session/PR references. These fields
+stay in the task's original Markdown, including tasks inside ordinary notes.
+
+In **Settings → Assistants → Work with your agents**, choose a notebook and use
+**Set up a project…** to add a managed workflow section to the code project's
+`AGENTS.md` and `CLAUDE.md`. Existing instructions are preserved and backed up.
+Use **Connect** for the Claude Code or Codex MCP registration command. Setup
+does not start an agent, make a worktree, initialize Beads, or change global
+client configuration. Keep Omega open with assistant access enabled.
+
+Agents call `get_context`, `read_work_queue`, and `claim_task`, then keep the
+returned receipt for updates, release and handoff. Mutations require the exact
+source revision. A timeout must be followed by a fresh read, never a blind retry.
+Ready means unassigned, unclaimed, saved work in the first open status, with
+every prerequisite complete. Drafts, missing dependencies, dependency loops,
+explicit blockers, review work, and already-started tasks are excluded.
+Cross-page prerequisites must have durable IDs; `ensure_task_identity` and
+`set_task_dependencies` handle this without duplicating tasks. Use the folder
+task view or agent queue for cross-page readiness; a single task page
+conservatively treats prerequisites outside its loaded page as unavailable and
+links to their source.
+
+`handoff_task` stores decisions, changes, tests and next steps, releases the
+claim, and normally requests human review. It never marks work Done. For an
+unfinished handoff that another agent should pick up, explicitly return the task
+to the first open status and pass `needs_review: false`. Claims do not expire or
+get stolen automatically. A stopped agent's receipt is retained in the task
+metadata for deliberate recovery through `read_task_page` and `release_task`.
+
+**Claim coordination is local to one Mac.** The same-user MCP service serializes
+claims; Git and live editing are not a distributed lock service. For a shared
+Git/live notebook, **Use this Mac…** records the coordinator in
+`.omega/coordination.json`. All claiming agents must use that Omega instance.
+Other replicas without the matching coordinator identity refuse claims. Do not
+designate separate replicas independently. This is a cooperative workflow,
+not an access-control boundary: humans and raw file editors can still change
+task metadata. Cloud-wide agent claims and remote agent execution are not
+implemented.
+
+To migrate an existing [Beads](https://github.com/gastownhall/beads) project,
+run `bd export --no-memories -o omega-beads.jsonl` in that project, then choose
+**Import Beads…**. Review the preview before creating a new task page. Hierarchy,
+blocking dependencies, supported statuses, labels, assignees and handoff notes
+are mapped into Omega. Original records—including comments, priorities and
+other Beads fields—remain in metadata; unsupported relationships are flagged for
+review. Missing prerequisites remain blocked. The original Beads project is
+unchanged. This is a **one-time import**, not bidirectional Beads synchronization
+or full Beads feature parity. After verifying it, choose one task authority for
+ongoing work.
+
+These additions are on the development branch, not the published Mac release.
+Regression checks cover claim competition, stale revisions, ownership receipts,
+dependency loops, missing and cross-page targets, inline checklist preservation,
+idempotent setup, actual Beads 1.0.3 export records, concurrent handoffs, and the
+shared editor's Ready/detail views.
+
 ## Git notebooks
 
 Open **Settings → Git sync**. Choose GitHub or GitLab, then **Open Git folder** for an existing repository or enter its HTTPS URL and choose **Clone repository**. The repository becomes a normal notebook in the sidebar. Repositories must have an `origin` HTTPS remote; use the repository's top folder. Nested GitLab groups and self-hosted hosts are supported by the selected CLI's existing host login.

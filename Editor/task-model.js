@@ -42,6 +42,11 @@ export function validDetails(value,child=false){
  if(value.goals!==undefined&&(!Array.isArray(value.goals)||value.goals.length>32||new Set(value.goals).size!==value.goals.length||value.goals.some(id=>typeof id!=='string'||!/^[\w-]{1,80}$/.test(id))))return false;
  if(value.status!==undefined&&(!child||!validStatus(value.status)))return false;
  if(value.draft!==undefined&&typeof value.draft!=='boolean')return false;
+ for(const key of ['omegaAssignee','omegaBlocker','omegaHandoff','omegaRepository','omegaBranch','omegaSession','omegaPR'])if(value[key]!==undefined&&(typeof value[key]!=='string'||value[key].length>(key==='omegaHandoff'?12000:200)||value[key].includes('\0')))return false;
+ if(value.omegaReview!==undefined&&typeof value.omegaReview!=='boolean')return false;
+ if(value.omegaClaim!==undefined&&(!value.omegaClaim||typeof value.omegaClaim!=='object'||['owner','token','at'].some(k=>typeof value.omegaClaim[k]!=='string'||!value.omegaClaim[k]||value.omegaClaim[k].length>200||value.omegaClaim[k].includes('\0'))))return false;
+ if(value.omegaDependencies!==undefined){const ds=value.omegaDependencies;if(!Array.isArray(ds)||ds.length>32||ds.some(d=>!d||typeof d!=='object'||Object.keys(d).some(k=>!['id','path'].includes(k))||typeof d.id!=='string'||! /^[\w-]{1,80}$/.test(d.id)||d.path!==undefined&&(typeof d.path!=='string'||d.path.length>2000||d.path.startsWith('/')||/[\\\0]/.test(d.path)))||new Set(ds.map(d=>(d.path||'')+'#'+d.id)).size!==ds.length)return false;}
+
  return true;
 }
 export function walkTasks(model){

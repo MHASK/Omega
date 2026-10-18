@@ -75,6 +75,15 @@ struct FolderTaskSnapshot {
                 }
                 return goalIDs[source.key]?.contains(goal) == true ? Self.identity(source.key, goal) : goal
             }
+            if d.extra["omegaDependencies"] != nil {
+                d.extra["omegaDependencies"] = .array(TaskCoordination.dependencies(original).map { dep in
+                    guard let targetID = Self.string(dep["id"]) else { return .object(dep) }
+                    let targetURL = Self.string(dep["path"]).map { source.url.deletingLastPathComponent().appendingPathComponent($0).standardizedFileURL } ?? source.url
+                    guard let target = sources.first(where: { $0.url.standardizedFileURL == targetURL }),
+                          target.document.references.contains(where: { $0.kind != "goal" && ($0.details.id ?? Self.legacyID(target.key, $0.reference)) == targetID }) else { return .object(dep) }
+                    return .object(["id": .string(Self.identity(target.key, targetID))])
+                })
+            }
             return d
         }
         for source in sources {
@@ -115,6 +124,18 @@ struct FolderTaskSnapshot {
             let key = Self.string(g.details.extra["_folderSource"])!
             goals[g.details.id!] = (sources.first { $0.key == key }!, Self.string(g.details.extra["_folderID"])!)
         }
+        var taskTargets: [String: (source: FolderTaskSource, id: String)] = [:]
+        for ref in all where ref.kind != "goal" {
+            let key = Self.string(ref.details.extra["_folderSource"])!
+            taskTargets[ref.details.id!] = (sources.first { $0.key == key }!, Self.string(ref.details.extra["_folderID"])!)
+        }
+        // Recovered external cycles stay readable; new dependency edits cannot introduce one.
+        let dependenciesChanged = proposal.references.contains { ref in
+            let old = document.references.first { $0.details.id == ref.details.id }
+            return ref.details.extra["omegaDependencies"] != old?.details.extra["omegaDependencies"]
+        }
+        if dependenciesChanged { try TaskCoordination.rejectCycles(proposal) }
+        let referencedTasks = Set(all.flatMap { TaskCoordination.dependencies($0.details).compactMap { $0["path"] == nil ? Self.string($0["id"]) : nil } })
         func subset(_ doc: TaskDocument, _ key: String) -> TaskDocument {
             var d = doc; d.goals = d.goals.filter { Self.string($0.details.extra["_folderSource"]) == key }
             d.tasks = d.tasks.filter { Self.string($0.details.extra["_folderSource"]) == key }; return d
@@ -126,7 +147,10 @@ struct FolderTaskSnapshot {
             let needsGoalIdentity = desired.goals.contains { goal in
                 referencedGoals.contains(goal.details.id ?? "") && !source.persistedIDs.contains(Self.string(goal.details.extra["_folderID"]) ?? "")
             }
-            guard needsGoalIdentity || !Self.equal(desired, previous) else { continue }
+            let needsTaskIdentity = desired.references.contains { ref in
+                referencedTasks.contains(ref.details.id ?? "") && !source.persistedIDs.contains(Self.string(ref.details.extra["_folderID"]) ?? "")
+            }
+            guard needsGoalIdentity || needsTaskIdentity || !Self.equal(desired, previous) else { continue }
             var output = source.document
             func localStatus(_ name: String) -> String {
                 if name == proposal.completedStatus { return output.completedStatus }
@@ -152,6 +176,14 @@ struct FolderTaskSnapshot {
                 }
                 links = links.filter { (d.goals ?? []).contains($0.key) }
                 if links.isEmpty { d.extra.removeValue(forKey: "omegaGoalSources") } else { d.extra["omegaGoalSources"] = .object(links) }
+                if d.extra["omegaDependencies"] != nil {
+                    d.extra["omegaDependencies"] = .array(TaskCoordination.dependencies(d).map { dep in
+                        guard dep["path"] == nil, let virtual = Self.string(dep["id"]), let target = taskTargets[virtual] else { return .object(dep) }
+                        var record: [String: TaskJSON] = ["id": .string(target.id)]
+                        if target.source.key != source.key { record["path"] = .string(Self.relative(target.source.url, from: source.url.deletingLastPathComponent())) }
+                        return .object(record)
+                    })
+                }
                 return d
             }
             func child(_ input: TaskCheckItem) throws -> TaskCheckItem {
@@ -166,7 +198,8 @@ struct FolderTaskSnapshot {
             }
             // Legacy IDs are only persisted when a page actually changes.
             try TaskPreferences(statuses: output.statuses, completed: output.completedStatus).validate()
-            let text = try source.inline.map { try $0.render(output) } ?? output.markdown
+            let requiredIDs = Set(desired.references.filter { referencedTasks.contains($0.details.id ?? "") }.compactMap { Self.string($0.details.extra["_folderID"]) })
+            let text = try source.inline.map { try $0.render(output, persisting: requiredIDs) } ?? output.markdown
             if text != source.text { result.append(Edit(url: source.url, before: source.text, after: text)) }
         }
         return result
@@ -230,7 +263,7 @@ struct InlineTaskDocument {
             rows[index] = row
         }
     }
-    func render(_ proposed: TaskDocument) throws -> String {
+    func render(_ proposed: TaskDocument, persisting requiredIDs: Set<String> = []) throws -> String {
         let old = document.references
         // Match rows by their old explicit ID; untouched legacy rows use the same
         // generated IDs assigned by the folder source adapter.
@@ -268,7 +301,7 @@ struct InlineTaskDocument {
             let previous = old.first { $0.reference == row.ref }
             let next = proposed.references.first { $0.details.id == replacement.id }
             if let previous, let next, previous.title == next.title, previous.status == next.status,
-               FolderTaskSnapshot.equal(previous.details, next.details), !(next.kind == "goal" && !row.persisted) { continue }
+               FolderTaskSnapshot.equal(previous.details, next.details), !(!row.persisted && (next.kind == "goal" || requiredIDs.contains(replacement.id))) { continue }
             // Keep the source note's existing indentation for an in-place edit.
             let prefix = (source as NSString).substring(with: row.range).prefix { $0 == " " || $0 == "\t" }
             replacements.append((row.range, String(prefix) + replacement.text.drop { $0 == " " }))

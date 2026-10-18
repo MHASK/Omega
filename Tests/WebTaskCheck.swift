@@ -296,6 +296,34 @@ final class ResourceFiles: NSObject, WKURLSchemeHandler {
             precondition(tableOriginal == brokenTable)
             try await load("---\ntitle: Outside metadata\n---\n# Note\n", "unsupported-dialect")
             try await assertJS("!document.getElementById('source').hidden&&document.getElementById('import-health').textContent.includes('front matter')", "unsupported note dialects explain why original Markdown is preserved")
+            let workPlan = """
+            <!-- folio:tasks -->
+            # Team launch
+            ## To do
+            - [ ] Build the foundation
+              <!-- folio:task {"id":"foundation","description":"Agree on the contract, implement it, then run the regression checks."} -->
+            - [ ] Ship the release
+              <!-- folio:task {"id":"release","omegaDependencies":[{"id":"foundation"}],"omegaHandoff":"Waiting for foundation review. Keep the migration reversible."} -->
+            ## In progress
+            - [ ] Polish the sign-in flow
+              <!-- folio:task {"id":"signin","omegaAssignee":"Claude / sign-in","omegaBranch":"feature/sign-in","omegaSession":"sign-in-review","omegaHandoff":"Implemented the form. Keyboard and offline checks pass. Review the retry message."} -->
+            ## Done
+            """
+            view.frame.size=NSSize(width:1100,height:900);view.pageZoom=1
+            try await load(workPlan,"work-coordination")
+            _ = try await js("document.querySelector('[aria-label=\"Ready view\"]').click();true")
+            try await assertJS("document.querySelectorAll('.task-list-row').length===1&&!!document.querySelector('[data-task=foundation]')", "Ready shows only unassigned work with satisfied dependencies")
+            try await snapshot("-ready")
+            _ = try await js("document.querySelector('[aria-label=\"List view\"]').click();document.querySelector('[aria-label=\"Open task: Ship the release\"]').click();document.querySelector('.task-work-panel').open=true;document.querySelector('.task-work-panel').scrollIntoView({block:'center'});true")
+            try await settle()
+            try await assertJS("document.querySelector('.task-dependency-row').textContent.includes('Build the foundation')&&document.querySelector('[aria-label=Handoff]').value.includes('Waiting for foundation')", "Task details display linked prerequisites and the saved handoff")
+            try await snapshot("-coordination-dark")
+            _ = try await js("window.folio.configure({theme:'light'});true")
+            try await snapshot("-coordination-light")
+            view.frame.size=NSSize(width:480,height:800)
+            try await settle()
+            try await assertJS("document.documentElement.scrollWidth<=innerWidth+2&&[...document.querySelectorAll('.task-work-body input,.task-work-body textarea,.task-work-body select')].every(n=>n.getBoundingClientRect().right<=innerWidth)", "Work and handoff fields fit a narrow window")
+            try await snapshot("-coordination-narrow")
             print("All task detail, composer, persistence and responsive checks passed.")
         } catch {print("FAIL",error);failed=true}
         done=true;try? FileManager.default.removeItem(at:root)

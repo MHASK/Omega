@@ -34,6 +34,22 @@ add('wrong draft type',base.replace('"owner":"claude"','"draft":1'),false);
 add('deep JSON',base.replace('"owner":"claude"','"owner":'+JSON.stringify(Array.from({length:18}).reduce(v=>[v],0))),false);
 add('too many statuses',base+'\n'+Array.from({length:13},(_,i)=>`## Phase ${i}\n`).join(''),false);
 add('oversized metadata',base.replace('"owner":"claude"','"owner":"'+'x'.repeat(131073)+'"'),false);
+// Coordination metadata has the same validation and round-trip on every host.
+for(const [details,accepted] of [
+ [{omegaAssignee:'Claude',omegaHandoff:'Tests passed',omegaReview:true,omegaDependencies:[{id:'child'}]},true],
+ [{omegaClaim:{owner:'Codex',token:'receipt',at:'2026-10-18'}},true],
+ [{omegaDependencies:[{id:'remote',path:'../Plan.md'}]},true],
+ [{omegaDependencies:[{id:'bad.id'}]},false],
+ [{omegaDependencies:[{id:'child'},{id:'child'}]},false],
+ [{omegaDependencies:[{id:'child',path:'/absolute'}]},false],
+ [{omegaDependencies:[{id:'child',path:'back\\slash'}]},false],
+ [{omegaDependencies:[{id:'child',path:null}]},false],
+ [{omegaDependencies:'task'},false],
+ [{omegaClaim:{owner:'Codex'}},false],
+ [{omegaAssignee:'x'.repeat(201)},false],
+ [{omegaHandoff:'x'.repeat(12001)},false],
+ [{omegaReview:1},false]
+])add('coordination '+JSON.stringify(details).slice(0,90),base.replace('"owner":"claude"',JSON.stringify(details).slice(1,-1)),accepted,true);
 // Every truncation boundary, not a single hand-picked broken record.
 const characters=Array.from(base);for(let i=0;i<characters.length;i++)add('truncated '+i,characters.slice(0,i).join(''));
 for(let i=0;i<80;i++){
@@ -49,7 +65,7 @@ let results;
 if(process.argv[2]==='--verify')results=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
 else{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'omega-import-'));
- try{const file=path.join(dir,'fixtures.json'),binary=path.join(dir,'check');fs.writeFileSync(file,JSON.stringify(fixtures));execFileSync('swiftc',['Core.swift','Tests/TaskImportContract.swift','-o',binary]);results=JSON.parse(execFileSync(binary,[file],{maxBuffer:20e6}).toString());}
+ try{const file=path.join(dir,'fixtures.json'),binary=path.join(dir,'check');fs.writeFileSync(file,JSON.stringify(fixtures));execFileSync('swiftc',['Core.swift','Coordination.swift','Tests/TaskImportContract.swift','-o',binary]);results=JSON.parse(execFileSync(binary,[file],{maxBuffer:20e6}).toString());}
  finally{fs.rmSync(dir,{recursive:true,force:true});}
 }
 assert.equal(results.length,fixtures.length);

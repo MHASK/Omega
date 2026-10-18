@@ -487,3 +487,6 @@ assert(inlineTaskSaved.includes('<!-- omega-task: {"id":"inline-a","status":"In 
 assert(inlineTaskSaved.includes('- [x] Ask a friend')&&inlineTaskSaved.includes('| Keep | exact |'));
 inlineTaskEditor.destroy();
 console.log('PASS: inline folder task metadata stays hidden and survives rich note editing.');
+
+import {runCoordinationTests} from './task-coordination-test.mjs';
+runCoordinationTests();

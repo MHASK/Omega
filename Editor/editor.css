@@ -355,3 +355,24 @@ body.has-import-issue{display:flex;flex-direction:column}
 .linked-quote{border:1px solid var(--line);border-left:3px solid #a79ab8;border-radius:7px;margin:1.5em 0;overflow:hidden}.linked-quote-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:10px;color:var(--muted);background:color-mix(in srgb,var(--hover) 60%,var(--paper))}.linked-quote-origin{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.linked-quote-preview{padding:16px 18px;font-size:12px;max-height:540px;overflow:auto}.linked-quote-preview .tiptap{min-height:0}.linked-quote-preview .tiptap>:last-child{margin-bottom:0}.linked-quote-preview .tableWrapper{width:100%;max-width:100%;margin-inline:0}.linked-quote-preview.unavailable{color:var(--muted)}.linked-quote>pre{margin:0;border-radius:0;font-size:11px}
 
 .live-reference.ProseMirror-widget{white-space:nowrap;width:max-content;flex:none}.live-reference>span{white-space:nowrap;flex:none}.tiptap a[data-page-link]:has(.live-reference-placeholder){display:none}.linked-quote-input{display:block;resize:vertical;width:100%;min-height:60px;padding:12px;border:0;background:var(--code);color:var(--text);font:11px/1.6 ui-monospace,monospace}
+
+/* Work coordination stays compact and uses the same surface as task details. */
+.task-work-panel{margin:28px 0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.task-work-panel>summary{padding:13px 16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted,#939596)}
+.task-work-body{border-top:1px solid var(--line);padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px 18px}
+.task-work-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:12px;color:var(--muted,#939596)}
+.task-work-field:has(textarea),.task-work-dependencies,.task-work-hint,.task-work-review{grid-column:1/-1}
+.task-work-body input:not([type=checkbox]),.task-work-body textarea,.task-work-body select{box-sizing:border-box;width:100%;font:inherit;color:var(--text,#e2e2e2);background:transparent;border:1px solid var(--line);border-radius:5px;padding:8px 10px;min-height:34px}
+.task-work-body textarea{resize:vertical;line-height:1.6}.task-work-body input:focus,.task-work-body textarea:focus,.task-work-body select:focus{outline:1px solid var(--task-accent,#b5a8d3)}
+.task-work-hint,.task-ready-hint{font-size:12px;line-height:1.5;color:var(--muted,#939596);margin:0}.task-ready-hint{padding:0 16px 16px}
+.task-work-dependencies{display:grid;gap:8px}.task-dependency-row{display:flex;gap:8px;align-items:center}.task-dependency-row button{background:transparent;color:inherit;border:0;text-align:left;cursor:pointer;font:inherit;font-size:12px}.task-dependency-row button:first-child{flex:1;overflow-wrap:anywhere}.task-dependency-remove{font-size:18px!important;color:var(--muted,#939596)!important}
+.task-work-review{display:flex;gap:8px;align-items:center;font-size:12px}.task-work-error{color:#d99b90;font-size:12px;margin:0}.task-work-error:empty{display:none}
+.task-work-badge{font-size:10px;line-height:1.4;border-radius:4px;padding:3px 6px;background:#9aabd513;color:#aab8d3;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-work-badge.blocked{background:#d3ab7615;color:#c5af8d}.task-work-badge.review{background:#b6a2d515;color:#b9a9cf}.task-ready-group{margin:20px 24px}
+@media(max-width:650px){.task-work-body{grid-template-columns:1fr}}
+
+#task-page .task-work-body textarea{resize:vertical;overflow:auto;border:1px solid var(--line);border-radius:5px;padding:8px 10px;min-height:76px;max-height:180px;line-height:1.6}
+#task-page .task-work-body select{min-height:34px}
+.task-work-execution{grid-column:1/-1;border-top:1px solid var(--line);padding-top:12px}.task-work-execution>summary{cursor:pointer;font-size:12px;color:var(--muted)}.task-work-references{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 18px;padding-top:12px}
+@media(max-width:650px){.task-work-references{grid-template-columns:1fr}}
+
+:root:not([data-theme=dark]) .task-work-badge{color:#52688e;background:#52688e12}:root:not([data-theme=dark]) .task-work-badge.blocked{color:#81612b;background:#81612b12}:root:not([data-theme=dark]) .task-work-badge.review{color:#765995;background:#76599512}
