@@ -80,13 +80,13 @@ Enable **Settings → Assistants → Allow assistant access**, then copy the MCP
 claude mcp add --transport stdio --scope user folio -- /Applications/Omega.app/Contents/MacOS/Folio --mcp
 ```
 
-Restart/reconnect the client after updating Omega. The service supports notes, folders, task pages, nested tasks, goals and goal links. Access is limited to open notebooks; writes use revision checks and saved history. Both you and an assistant can edit, with conflicting writes rejected instead of silently overwriting your work. No notes are sent to GitHub by the updater. A connected assistant handles note content according to that client's settings.
+Restart/reconnect the client after updating Omega. Omega stays responsive to assistant requests while in the background; linked-page parsing runs away from the UI, and stalled requests expire instead of blocking the connection. The service supports notes, folders, task pages, nested tasks, goals and goal links. Access is limited to open notebooks; writes use revision checks and saved history. Both you and an assistant can edit, with conflicting writes rejected instead of silently overwriting your work. No notes are sent to GitHub by the updater. A connected assistant handles note content according to that client's settings.
 
 Open notes update as writes arrive. MCP clients identify themselves during connection, so Omega can show “Updated by Claude” or “Updated by Codex” beside the document controls. Changed passages briefly highlight without moving your selection. Direct filesystem edits are labeled “Updated externally” because a file write does not reliably identify its author. This is edit activity, not a simulated assistant cursor: MCP does not send a continuous caret position.
 
 Omega watches the open file, including atomic file replacements, and keeps a periodic fallback check. Direct filesystem updates must remain unchanged for a short interval before display, avoiding partial-file flashes during chunked writes. Independent outside edits merge with unsaved typing; overlapping edits retain the local recovery copy and the outside file, with a review indicator instead of an automatic interruption. Updates wait while an editing dialog or text composition is active.
 
-## Agent planning and Beads migration (in development)
+## Agent planning and Beads migration
 
 Omega keeps the shared plan; Claude Code and Codex manage their own worktrees,
 branches, sessions and tests. Task pages and folder task views now have a **Ready**

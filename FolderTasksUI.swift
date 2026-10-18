@@ -135,9 +135,11 @@ import WebKit
             }
         case "references":
             guard let key = body["source"] as? String, let source = snapshot?.sources.first(where: { $0.key == key }), let request = body["request"] as? String, let links = body["links"] as? [String] else { return }
-            let response: [String: Any] = ["request": request, "rows": LinkedContent.rows(links, from: source.url, notebook: notebook)]
-            let json = String(decoding: AssistantWire.json(response), as: UTF8.self)
-            webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
+            let requestedFolder = notebook.checklistFolder
+            LinkedContent.request(links, from: source.url, notebook: notebook, request: request) { [weak self] json in
+                guard let self, self.notebook?.checklistFolder == requestedFolder else { return }
+                self.webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
+            }
         case "pages":
             guard let key = body["source"] as? String, let current = snapshot?.sources.first(where: { $0.key == key }) else { return }
             let kind = body["kind"] as? String ?? "all"

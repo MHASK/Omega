@@ -6,11 +6,11 @@ import {isPageHref} from './page-links.js';
 import {parseTasks,walkTasks,subtaskStatus,goalProgress} from './task-model.js';
 import {completionRing,projectCompletion,taskCompletion} from './completion-ring.js';
 
-const subscribers=new Map();let sequence=0,timer=null,latest='',scheduled=false;
-function poll(){if(!subscribers.size||!window.omegaReferenceRequest)return;latest=String(++sequence);window.omegaReferenceRequest(latest,[...new Set([...subscribers.values()].map(s=>s.href))].slice(0,100));}
+const subscribers=new Map();let sequence=0,timer=null,latest='',scheduled=false,inFlight=false;
+function poll(){if(inFlight||!subscribers.size||!window.omegaReferenceRequest)return;inFlight=true;latest=String(++sequence);window.omegaReferenceRequest(latest,[...new Set([...subscribers.values()].map(s=>s.href))].slice(0,100));}
 function requestPoll(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;poll();});}
-function subscribe(href,callback){const key={};subscribers.set(key,{href,callback});if(!timer)timer=setInterval(poll,2000);requestPoll();return()=>{subscribers.delete(key);if(!subscribers.size){clearInterval(timer);timer=null;latest='';}};}
-if(typeof window!=='undefined')window.omegaReferences={receive(request,rows){if(request!==latest)return;const byHref=new Map(rows.map(row=>[row.href,row]));for(const s of subscribers.values())if(byHref.has(s.href))s.callback(byHref.get(s.href));}};
+function subscribe(href,callback){const key={};subscribers.set(key,{href,callback});if(!timer)timer=setInterval(poll,2000);requestPoll();return()=>{subscribers.delete(key);if(!subscribers.size){clearInterval(timer);timer=null;latest='';inFlight=false;}};}
+if(typeof window!=='undefined')window.omegaReferences={receive(request,rows){if(request!==latest)return;inFlight=false;const byHref=new Map(rows.map(row=>[row.href,row]));for(const s of subscribers.values())if(byHref.has(s.href))s.callback(byHref.get(s.href));}};
 export function linkedSummary(row){
  if(row.error)return {error:row.error};if(row.goalProgress)return row.goalProgress;const model=parseTasks(row.tasks||'');if(!model)return null;
  const match=row.href.match(/#folio-(task|goal)-([\w-]+)$/);if(!match){const p=projectCompletion(model);return p.total?{...p,status:p.completed===p.total?model.completed:'',name:row.name}:null;}

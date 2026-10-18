@@ -211,10 +211,10 @@ indirect enum TaskJSON: Codable, Equatable {
         case .object(let v): try c.encode(v)
         }
     }
+    private static let jsonTokens = try! NSRegularExpression(pattern: #""(?:\\.|[^"\\])*"|[{}\[\]:,]"#)
     static func uniqueKeys(_ json: String) -> Bool {
         let source = json as NSString
-        let pattern = #""(?:\\.|[^"\\])*"|[{}\[\]:,]"#
-        let tokens = (try! NSRegularExpression(pattern: pattern)).matches(in: json, range: NSRange(location: 0, length: source.length)).map { source.substring(with: $0.range) }
+        let tokens = jsonTokens.matches(in: json, range: NSRange(location: 0, length: source.length)).map { source.substring(with: $0.range) }
         var stack: [Set<String>?] = []
         for (i, token) in tokens.enumerated() {
             if token == "{" { stack.append(Set<String>()) }

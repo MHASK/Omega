@@ -34,6 +34,11 @@ enum AssistantWire {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout)))
         return fd
     }
+    static func connected(_ fd: Int32) -> Bool {
+        var byte: UInt8 = 0
+        let count = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        return count > 0 || (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+    }
     static func connect() throws -> Int32 {
         let fd = try socket(); var addr = try address(path)
         let result = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
@@ -67,7 +72,22 @@ enum AssistantWire {
     static func hash(_ text: String) -> String { SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined() }
 }
 
-private final class AssistantReply: @unchecked Sendable { var data = Data() }
+final class AssistantReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var response: Data?
+    private var expired = false
+    var isActive: Bool { lock.lock(); defer { lock.unlock() }; return !expired && response == nil }
+    func finish(_ data: Data) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !expired && response == nil else { return false }
+        response = data; return true
+    }
+    func take() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        expired = true
+        return response ?? AssistantWire.json(FolioMCP.failure("Omega did not finish this request in time. Read the note before retrying any edit; an in-progress edit may have completed."))
+    }
+}
 
 @MainActor final class AssistantServer {
     private var fd: Int32 = -1
@@ -99,16 +119,22 @@ private final class AssistantReply: @unchecked Sendable { var data = Data() }
                 var noSignal: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
                 guard let data = try? AssistantWire.read(client), let request = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+                let deadline = min(request["deadline"] as? Double ?? Date().timeIntervalSince1970 + 20, Date().timeIntervalSince1970 + 20)
+                let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Responding to a connected assistant")
+                defer { ProcessInfo.processInfo.endActivity(activity) }
                 let done = DispatchSemaphore(value: 0)
                 let reply = AssistantReply()
                 DispatchQueue.main.async { [weak self] in
-                    guard let self, self.active else { reply.data = AssistantWire.json(FolioMCP.failure("Assistant access is off.")); done.signal(); return }
-                    self.service.handle(request) { response in
-                        reply.data = AssistantWire.json(response); done.signal()
+                    guard reply.isActive, Date().timeIntervalSince1970 < deadline, AssistantWire.connected(client) else {
+                        _ = reply.finish(AssistantWire.json(FolioMCP.failure("This request expired before it could run. No changes were made."))); done.signal(); return
+                    }
+                    guard let self, self.active else { _ = reply.finish(AssistantWire.json(FolioMCP.failure("Assistant access is off."))); done.signal(); return }
+                    self.service.handle(request, isActive: { reply.isActive && Date().timeIntervalSince1970 < deadline && AssistantWire.connected(client) }) { response in
+                        if reply.finish(AssistantWire.json(response)) { done.signal() }
                     }
                 }
-                done.wait()
-                try? AssistantWire.write(reply.data, to: client)
+                _ = done.wait(timeout: .now() + max(0, deadline - Date().timeIntervalSince1970))
+                try? AssistantWire.write(reply.take(), to: client)
             }
         }
     }
@@ -188,6 +214,7 @@ enum FolioMCP {
                         let fd = try AssistantWire.connect(); defer { close(fd) }
                         var forwarded = params
                         forwarded["clientName"] = clientName
+                        forwarded["deadline"] = Date().timeIntervalSince1970 + 20
                         try AssistantWire.write(AssistantWire.json(forwarded), to: fd)
                         guard let received = try JSONSerialization.jsonObject(with: AssistantWire.read(fd)) as? [String: Any] else { throw AssistantError("Invalid Omega response.") }
                         result = received
@@ -285,9 +312,12 @@ enum FolioMCP {
         }
         return (name, args)
     }
-    func handle(_ request: [String: Any], completion: @escaping ([String: Any]) -> Void) {
+    func handle(_ request: [String: Any], isActive: @escaping () -> Bool = { true }, completion: @escaping ([String: Any]) -> Void) {
         do {
             let (name, args) = try validate(request)
+            guard isActive() else { return }
+            // Discovery never depends on a web editor snapshot or a disk save.
+            if name == "get_context" { completion(FolioMCP.success(try execute(name, args))); return }
             let author = FolioMCP.displayName(request["clientName"] as? String)
             let editing = name == "update_note" || FolioMCP.taskMutationNames.contains(name) || FolioMCP.workMutationNames.contains(name)
             let file = editing ? (args["path"] as? String).map { URL(fileURLWithPath: $0).standardizedFileURL } : nil
@@ -299,6 +329,7 @@ enum FolioMCP {
                 completion(response)
             }
             let perform = {
+                guard isActive() else { return }
                 do {
                     try self.notebook.prepareAssistantAccess()
                     if name == "update_note" { try self.update(args, completion: finish) }

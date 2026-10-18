@@ -28,7 +28,7 @@ extension FolioMCP {
             let input = FileHandle.standardInput.readDataToEndOfFile()
             guard input.count < AssistantWire.maximum, let args = try JSONSerialization.jsonObject(with: input) as? [String: Any] else { throw AssistantError("Pass a JSON object on stdin.") }
             let fd = try AssistantWire.connect(); defer { close(fd) }
-            try AssistantWire.write(AssistantWire.json(["name": name, "arguments": args, "clientName": "Omega agent CLI"]), to: fd)
+            try AssistantWire.write(AssistantWire.json(["name": name, "arguments": args, "clientName": "Omega agent CLI", "deadline": Date().timeIntervalSince1970 + 20]), to: fd)
             let result = try AssistantWire.read(fd); FileHandle.standardOutput.write(result + Data([10]))
             return ((try JSONSerialization.jsonObject(with: result)) as? [String: Any])?["isError"] as? Bool == true ? 1 : 0
         } catch { FileHandle.standardOutput.write(AssistantWire.json(failure(error.localizedDescription)) + Data([10])); return 1 }

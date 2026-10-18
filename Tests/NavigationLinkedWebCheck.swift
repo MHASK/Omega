@@ -40,6 +40,17 @@ import WebKit
         notebook.select(noteURL)
         try await wait { guard let web=notebook.richEditor?.webView else{return false};return try await js(web,"document.querySelector('.linked-quote-preview')?.textContent.includes('A quiet place') && document.querySelectorAll('.live-reference').length>=6") as? Bool == true }
         let web=notebook.richEditor!.webView!
+        // A slow native response must not accumulate a new full scan every two seconds.
+        _ = try await js(web, "window.testOriginalReferences=window.omegaReferenceRequest;window.testReferenceCalls=0;window.testHeldReference=null;window.omegaReferenceRequest=(...args)=>{window.testReferenceCalls++;window.testHeldReference=args};true")
+        try await Task.sleep(for: .seconds(5))
+        try require(try await js(web,"window.testReferenceCalls===1") as? Bool == true,"slow linked updates allow only one request in flight")
+        _ = try await js(web,"window.omegaReferenceRequest=window.testOriginalReferences;window.omegaReferenceRequest(...window.testHeldReference);true")
+        // Native discovery must remain available even during document loading.
+        notebook.loading = true
+        var discovery: [String: Any]?
+        AssistantService(notebook).handle(["name":"get_context"]) { discovery = $0 }
+        try require(discovery?["isError"] as? Bool == false,"assistant discovery does not depend on editor synchronization")
+        notebook.loading = false
         try require(try await js(web,"!document.querySelector('.linked-quote-preview').textContent.includes('This section is not quoted') && document.querySelector('.live-reference-status').textContent==='To do'") as? Bool == true,"quotes follow only their selected section; task statuses appear inside table cells")
         try require(try await js(web,"[...document.querySelectorAll('.live-reference')].some(n=>n.title.includes('Ship the next chapter')&&n.title.includes('1/2'))") as? Bool == true,"goal references include linked tasks from other source pages")
         try await Task.sleep(for: .milliseconds(250))

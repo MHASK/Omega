@@ -19,6 +19,16 @@ import Foundation
             precondition(response!["isError"] as? Bool == fails, String(describing: response))
             return response!["structuredContent"] as? [String: Any] ?? [:]
         }
+        let expired = AssistantReply()
+        _ = expired.take()
+        precondition(!expired.isActive && !expired.finish(Data("late".utf8)))
+        let once = AssistantReply()
+        precondition(once.finish(Data("first".utf8)) && !once.finish(Data("second".utf8)))
+        precondition(once.take() == Data("first".utf8))
+        var expiredCallback = false
+        service.handle(["name": "create_note", "arguments": ["folder": root.path, "name": "Expired", "markdown": "Must not write"]], isActive: { false }) { _ in expiredCallback = true }
+        precondition(!expiredCallback && !FileManager.default.fileExists(atPath: root.appendingPathComponent("Expired.md").path))
+        print("PASS: expired assistant requests cannot apply queued edits; replies complete once")
         func note(_ result: [String: Any]) -> (String, String) { (result["path"] as! String, result["revision"] as! String) }
         let explicitStatus = "<!-- folio:tasks -->\n# Outside edits\n\n## Goals\n- [ ] Goal\n\n## To do\n- [ ] Parent\n  <!-- folio:task {\"id\":\"parent\",\"status\":\"Done\",\"description\":\"Keep **details**\",\"labels\":[\"Writing\"]} -->\n  - [ ] Child\n    <!-- folio:task {\"id\":\"child\",\"status\":\"In progress\"} -->\n\n## In progress\n\n## Done\n"
         let explicit = try TaskDocument(markdown: explicitStatus)
@@ -198,7 +208,8 @@ import Foundation
         precondition(store.text == "# Human again\n")
         store.edit("# Draft\n")
         try "# Outside\n".write(to: visible, atomically: true, encoding: .utf8)
-        _ = call("get_context", fails: true)
+        _ = call("get_context")
+        _ = call("read_note", ["path": visible.path], fails: true)
         precondition(store.text == "# Draft\n")
         store.dirty = false // Fixture teardown; never save the divergent draft.
         let newBook = call("create_notebook", ["beside": root.path, "name": "Other book"])

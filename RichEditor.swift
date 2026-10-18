@@ -126,13 +126,23 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         // A failed or pending load may contain a partial model from the prior
         // note. Only a successfully loaded identity can supply edits to save.
         guard ready, loadedReadyID == identity, let webView else { completion(true); return }
+        let requestedID = identity
+        var finished = false
+        let finish: (Bool) -> Void = { success in
+            guard !finished else { return }; finished = true; completion(success)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { finish(false) }
         webView.evaluateJavaScript("window.folio.snapshot()") { [weak self] value, error in
-            guard let self else { completion(true); return }
-            if let error { self.notebook?.showError(error); completion(false); return }
-            if let snapshot = value as? [String: Any], snapshot["id"] as? String == self.identity, let text = snapshot["text"] as? String, text != self.notebook?.text { self.notebook?.edit(text) }
-            completion(true)
+            guard !finished else { return }
+            guard let self, self.identity == requestedID else { finish(false); return }
+            guard error == nil else { finish(false); return }
+            guard let snapshot = value as? [String: Any], snapshot["id"] as? String == requestedID,
+                  let text = snapshot["text"] as? String else { finish(false); return }
+            if text != self.notebook?.text { self.notebook?.edit(text) }
+            finish(true)
         }
     }
+
     func replaceForAssistant(expected: String, text: String, completion: @escaping (Result<Void, Error>) -> Void) {
         guard ready, loadedReadyID == identity, let webView else { completion(.failure(AssistantError("The editor is loading. Retry shortly."))); return }
         let requestedID = identity
@@ -199,9 +209,11 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         case "image": chooseImage()
         case "references":
             guard body["id"] as? String == identity, let source = notebook.selected, let request = body["request"] as? String, let hrefs = body["links"] as? [String] else { return }
-            let response: [String: Any] = ["request": request, "rows": LinkedContent.rows(hrefs, from: source, notebook: notebook)]
-            let json = String(decoding: AssistantWire.json(response), as: UTF8.self)
-            webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
+            let requestedID = identity
+            LinkedContent.request(hrefs, from: source, notebook: notebook, request: request) { [weak self] json in
+                guard let self, self.identity == requestedID else { return }
+                self.webView?.evaluateJavaScript("(function(r){window.omegaReferences?.receive(r.request,r.rows)})(\(json))", completionHandler: nil)
+            }
         case "pages":
             guard body["id"] as? String == identity, let request = body["request"] as? String, let note = notebook.selected else { return }
             var seen = Set<String>(), pages: [[String: String]] = []
@@ -337,7 +349,32 @@ struct RichEditor: NSViewRepresentable {
 
 // Read-only projections. A reference never copies the source into the quoting
 // note or rewrites the user's table. All paths use the normal notebook boundary.
-@MainActor enum LinkedContent {
+enum LinkedContent {
+    struct Snapshot {
+        let roots: [URL]
+        let archived: Set<String>
+        let selected: URL?
+        let text: String
+        let preferences: TaskPreferences
+        let files: [URL]
+        func isArchived(_ url: URL) -> Bool { archived.contains { url.path == $0 || url.path.hasPrefix($0 + "/") } }
+        func owner(of url: URL) -> URL? { roots.filter { url.path.hasPrefix($0.path + "/") }.max { $0.path.count < $1.path.count } }
+        @MainActor init(_ notebook: Notebook) {
+            roots = notebook.roots; archived = notebook.library.archived; selected = notebook.selected
+            text = notebook.text; preferences = notebook.taskPreferences
+            files = roots.flatMap { NoteFiles.flatten(notebook.trees[$0] ?? []) }.filter { !$0.isFolder }.map(\.url)
+        }
+    }
+    // Parsing linked pages must never occupy the UI/MCP actor. Capture only values;
+    // background work cannot read or mutate the live notebook or editor.
+    @MainActor static func request(_ hrefs: [String], from source: URL, notebook: Notebook, request: String, completion: @escaping (String) -> Void) {
+        let snapshot = Snapshot(notebook)
+        DispatchQueue.global(qos: .utility).async {
+            let response: [String: Any] = ["request": request, "rows": rows(hrefs, from: source, snapshot: snapshot)]
+            let json = String(decoding: AssistantWire.json(response), as: UTF8.self)
+            DispatchQueue.main.async { completion(json) }
+        }
+    }
     static func headings(_ text: String) -> [(line: Int, level: Int, title: String)] {
         var result: [(Int, Int, String)] = [], fence: Character?
         for (i, line) in text.components(separatedBy: "\n").enumerated() {
@@ -357,17 +394,24 @@ struct RichEditor: NSViewRepresentable {
     static func sectionHref(_ href: String, title: String) -> String {
         href + "#omega-section-" + (title.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
     }
-    static func rows(_ hrefs: [String], from source: URL, notebook: Notebook) -> [[String: Any]] {
-        var cache: [URL: String] = [:]
+    static func rows(_ hrefs: [String], from source: URL, snapshot: Snapshot) -> [[String: Any]] {
+        var cache: [URL: String] = [:], documents: [URL: TaskDocument] = [:]
+        var parsed = Set<URL>()
+        func parsedDocument(_ url: URL, _ text: String) -> TaskDocument? {
+            if parsed.insert(url).inserted {
+                documents[url] = TaskDocument.isTaskPage(text) ? try? TaskDocument(markdown: text) : try? InlineTaskDocument(text, preferences: snapshot.preferences).document
+            }
+            return documents[url]
+        }
         return Array(Set(hrefs)).sorted().prefix(100).map { href in
             var row: [String: Any] = ["href": href]
             do {
-                guard href.count < 4096, let url = NoteLinks.resolve(href, from: source, roots: notebook.roots), !notebook.isArchived(url) else { throw TaskPageError("Source page is unavailable.") }
+                guard href.count < 4096, let url = NoteLinks.resolve(href, from: source, roots: snapshot.roots), !snapshot.isArchived(url) else { throw TaskPageError("Source page is unavailable.") }
                 let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
                 guard values.isRegularFile == true, (values.fileSize ?? 0) < 500_000 else { throw TaskPageError("This source is too large to preview.") }
                 let text: String
                 if let cached = cache[url] { text = cached }
-                else { text = url == notebook.selected ? notebook.text : try String(contentsOf: url, encoding: .utf8); cache[url] = text }
+                else { text = url == snapshot.selected ? snapshot.text : try String(contentsOf: url, encoding: .utf8); cache[url] = text }
                 var excerpt = text, name = url.deletingPathExtension().lastPathComponent
                 if let fragment = href.split(separator: "#", maxSplits: 1).dropFirst().first, fragment.hasPrefix("omega-section-") {
                     let heading = String(fragment.dropFirst(14)).removingPercentEncoding ?? ""
@@ -380,24 +424,24 @@ struct RichEditor: NSViewRepresentable {
                 }
                 row["name"] = name; row["markdown"] = excerpt
                 if let fragment = href.split(separator: "#", maxSplits: 1).dropFirst().first, fragment.hasPrefix("folio-goal-"),
-                   let document = try? TaskDocument(markdown: text), let goal = document.goals.first(where: { $0.details.id == String(fragment.dropFirst(11)) }) {
+                   let document = parsedDocument(url, text), let goal = document.goals.first(where: { $0.details.id == String(fragment.dropFirst(11)) }) {
                     let own = document.goalProgress(goal)
                     var total = own.linked.count, completed = own.completed
-                    if let owner = notebook.owner(of: url) {
-                        for entry in NoteFiles.flatten(notebook.trees[owner] ?? []) where !entry.isFolder && entry.url != url && !notebook.isArchived(entry.url) {
-                            guard let size = try? entry.url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 500_000 else { continue }
+                    if let owner = snapshot.owner(of: url) {
+                        for file in snapshot.files where file != url && snapshot.owner(of: file) == owner && !snapshot.isArchived(file) {
+                            guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 500_000 else { continue }
                             let otherText: String
-                            if let cached = cache[entry.url] { otherText = cached }
-                            else if let read = try? String(contentsOf: entry.url, encoding: .utf8) { otherText = read; cache[entry.url] = read }
+                            if let cached = cache[file] { otherText = cached }
+                            else if let read = try? String(contentsOf: file, encoding: .utf8) { otherText = read; cache[file] = read }
                             else { continue }
                             guard otherText.contains("omegaGoalSources") else { continue }
-                            let other = (try? TaskDocument(markdown: otherText)) ?? (try? InlineTaskDocument(otherText, preferences: notebook.taskPreferences).document)
+                            let other = parsedDocument(file, otherText)
                             guard let other else { continue }
                             for ref in other.references where ref.kind != "goal" && ref.details.draft != true {
                                 guard case .object(let links) = ref.details.extra["omegaGoalSources"] else { continue }
                                 let linked = (ref.details.goals ?? []).contains { alias in
                                     guard case .object(let link) = links[alias], case .string(let path) = link["path"], case .string(let id) = link["id"] else { return false }
-                                    return id == goal.details.id && entry.url.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL == url.standardizedFileURL
+                                    return id == goal.details.id && file.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL == url.standardizedFileURL
                                 }
                                 if linked { total += 1; if ref.status == other.completedStatus { completed += 1 } }
                             }
@@ -406,8 +450,9 @@ struct RichEditor: NSViewRepresentable {
                     let done = total > 0 ? completed == total : goal.completed
                     row["goalProgress"] = ["name": goal.title, "total": max(1, total), "completed": total > 0 ? completed : (done ? 1 : 0), "status": done ? "Done" : completed > 0 ? "In progress" : "Not started"]
                 }
-                if TaskDocument.isTaskPage(text) { _ = try TaskDocument(markdown: text); row["tasks"] = text }
-                else if let inline = try? InlineTaskDocument(text, preferences: notebook.taskPreferences), !inline.document.tasks.isEmpty { row["tasks"] = inline.document.markdown }
+                if let parsed = parsedDocument(url, text), !parsed.tasks.isEmpty || !parsed.goals.isEmpty {
+                    row["tasks"] = TaskDocument.isTaskPage(text) ? text : parsed.markdown
+                }
             } catch { row["error"] = error.localizedDescription }
             return row
         }
