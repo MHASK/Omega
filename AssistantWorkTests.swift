@@ -114,6 +114,7 @@ import Foundation
     let preview = try BeadsImport.preview(exported), imported = try TaskDocument(markdown: preview.markdown)
     precondition(preview.count == 3 && imported.tasks.count == 2 && imported.tasks.first { $0.title == "Launch" }?.subtasks.first?.title == "Ship")
     precondition(imported.tasks.first { $0.title == "Launch" }?.details.extra["beads"] != nil)
+    precondition(imported.tasks.allSatisfy { $0.details.extra["omegaPriority"] == .number(2) })
     precondition(imported.references.first { $0.title == "Ship" }.map { TaskCoordination.state($0, in: imported) } == "assigned")
     do { _ = try BeadsImport.preview(exported + "\n" + exported); preconditionFailure("Duplicate Beads IDs accepted") } catch {}
     print("PASS: repeatable agent setup preserves existing rules, backups and symlink boundaries; Beads import retains hierarchy, dependencies, owners, notes and original records")

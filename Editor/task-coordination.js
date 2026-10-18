@@ -27,6 +27,10 @@ export function setDependencies(model,item,targets){
 }
 const el=(tag,cls='',text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
 const control=n=>{n.dataset.mutates='true';return n;};
+export function priorityBadge(item){
+ if(!Number.isInteger(item.details?.omegaPriority))return null;
+ const badge=el('span','task-priority','P'+item.details.omegaPriority);badge.title=['Urgent','High','Normal','Low','Backlog'][item.details.omegaPriority];badge.setAttribute('aria-label','Priority '+badge.textContent+' · '+badge.title);return badge;
+}
 export function workBadge(view,item){
  const {state,blockers,cyclic}=(view.workGraph||workGraph(view.model))(item),owner=item.details.omegaClaim?.owner||item.details.omegaAssignee;
  if(!owner&&!['blocked','review'].includes(state))return null;
@@ -41,6 +45,9 @@ export function coordinationPanel(view,item){
   const wrap=el('label','task-work-field');wrap.append(el('span','',label));const input=control(el(multiline?'textarea':'input'));input.value=item.details[key]||'';input.placeholder=placeholder;input.setAttribute('aria-label',label);input.maxLength=multiline?12000:200;input.rows=3;
   input.oninput=()=>{if(input.value)item.details[key]=input.value;else delete item.details[key];save();};wrap.append(input);container.append(wrap);return input;
  };
+ const priority=el('label','task-work-field');priority.append(el('span','','Priority'));const choice=control(el('select'));choice.setAttribute('aria-label','Task priority');
+ for(const [value,label] of [[-1,'No priority'],[0,'P0 · Urgent'],[1,'P1 · High'],[2,'P2 · Normal'],[3,'P3 · Low'],[4,'P4 · Backlog']]){const option=el('option','',label);option.value=String(value);choice.append(option);}
+ choice.value=String(item.details.omegaPriority??-1);choice.onchange=()=>{const value=Number(choice.value);if(value<0)delete item.details.omegaPriority;else item.details.omegaPriority=value;save();};priority.append(choice);body.append(priority);
  const owner=field('Assigned to','omegaAssignee','Person or agent');
  field('Waiting on','omegaBlocker','Describe a blocker, if there is one');
  if(item.details.omegaClaim){owner.disabled=true;delete owner.dataset.mutates;body.append(el('p','task-work-hint',`Claimed by ${item.details.omegaClaim.owner}. Release through the coordinating Omega connection.`));}

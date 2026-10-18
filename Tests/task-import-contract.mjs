@@ -48,7 +48,8 @@ for(const [details,accepted] of [
  [{omegaClaim:{owner:'Codex'}},false],
  [{omegaAssignee:'x'.repeat(201)},false],
  [{omegaHandoff:'x'.repeat(12001)},false],
- [{omegaReview:1},false]
+ [{omegaReview:1},false],
+ [{omegaPriority:0},true],[{omegaPriority:4},true],[{omegaPriority:-1},false],[{omegaPriority:5},false],[{omegaPriority:1.5},false],[{omegaPriority:true},false],[{omegaPriority:'P1'},false]
 ])add('coordination '+JSON.stringify(details).slice(0,90),base.replace('"owner":"claude"',JSON.stringify(details).slice(1,-1)),accepted,true);
 // Every truncation boundary, not a single hand-picked broken record.
 const characters=Array.from(base);for(let i=0;i<characters.length;i++)add('truncated '+i,characters.slice(0,i).join(''));

@@ -1,4 +1,4 @@
-import {workGraph,workBadge,coordinationPanel} from './task-coordination.js';
+import {workGraph,workBadge,priorityBadge,coordinationPanel} from './task-coordination.js';
 import {labelChip,applyLabelTone} from './task-labels.js';
 import {completionRing,projectCompletion,taskCompletion,taskCompletionRing} from './completion-ring.js';
 import {goalPicker,goalBadge,renderGoals,renderGoal} from './task-goals.js';
@@ -106,7 +106,7 @@ export class TaskPage {
   });root.append(groups);
  }
  renderReady(root){
-  const group=el('section','task-group task-ready-group'),entries=walkTasks(this.model).filter(e=>this.workGraph(e.item).ready);
+  const group=el('section','task-group task-ready-group'),entries=walkTasks(this.model).filter(e=>this.workGraph(e.item).ready).sort((a,b)=>(a.item.details.omegaPriority??2)-(b.item.details.omegaPriority??2));
   group.append(el('div','task-group-heading',`Ready to start · ${entries.length}`),el('p','task-ready-hint','Unassigned tasks in the first open status, with every dependency complete.'));
   const rows=el('div','task-list-rows');for(const {item,parent} of entries)rows.append(this.listRow(item,parent,0));group.append(rows);
   if(!entries.length)group.append(el('p','task-lane-empty','Nothing ready. Finish blockers or release assigned work to make it available.'));
@@ -144,7 +144,7 @@ export class TaskPage {
   leading.append(this.check(done,parent?'Complete subtask':'Complete task',v=>this.move(item,v?doneStatus(this.model):firstOpen(this.model),parent)));row.append(leading);
   const title=button(item.title||'Untitled task',`Open ${parent?'subtask':'task'}: ${item.title||'Untitled task'}`,()=>this.openDetail(item),'task-card-title task-row-title');title.title=item.title||'Untitled task';row.append(title);const source=this.options.sourceBadge?.(item);if(source)row.append(source);
   const progress=el('div','task-row-progress');if(item.children.length){const p=taskCompletion(this.model,item,parent),toggle=button(`${p.completed}/${p.total}`,p.label,()=>this.toggleList(item),'task-row-progress-button');toggle.prepend(taskCompletionRing(this.model,item,parent,true));toggle.setAttribute('aria-expanded',String(this.expandedList.has(item.id)));progress.append(toggle);}else progress.append(taskCompletionRing(this.model,item,parent));if(item.details?.draft)progress.append(el('span','task-draft-badge','Draft'));row.append(progress);
-  const labels=el('div','task-row-labels');const work=workBadge(this,item);if(work)labels.append(work);const badge=goalBadge(this,item);if(badge)labels.append(badge);for(const name of(item.details?.labels||[]).slice(0,2)){labels.append(labelChip(name));}if(item.details?.labels?.length>2){const extra=el('span','task-label task-label-overflow','+'+(item.details.labels.length-2));extra.title=item.details.labels.slice(2).join(', ');labels.append(extra);}row.append(labels);
+  const labels=el('div','task-row-labels');const priority=priorityBadge(item);if(priority)labels.append(priority);const work=workBadge(this,item);if(work)labels.append(work);const badge=goalBadge(this,item);if(badge)labels.append(badge);for(const name of(item.details?.labels||[]).slice(0,2)){labels.append(labelChip(name));}if(item.details?.labels?.length>2){const extra=el('span','task-label task-label-overflow','+'+(item.details.labels.length-2));extra.title=item.details.labels.slice(2).join(', ');labels.append(extra);}row.append(labels);
   const due=el('span','task-row-date');if(item.details?.due){due.append(taskIcon('calendar'),el('span','',this.dateLabel(item.details.due)));due.title=item.details.due;}row.append(due);
   const state=el('div','task-row-state');state.append(el('span','task-status-dot'+(done?' is-done':status===firstOpen(this.model)?'':' is-active')));const select=this.statusSelect(item,parent);select.title=this.model.statuses[status];state.append(select);row.append(state,button('','Open task details',()=>this.openDetail(item),'task-quiet-action task-row-more','more'));
   row.onkeydown=e=>{if(e.target!==title&&!e.target.classList.contains('task-row-disclosure'))return;if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const titles=[...this.element.querySelectorAll('.task-row-title')],index=titles.indexOf(title);titles[Math.max(0,Math.min(titles.length-1,index+(e.key==='ArrowDown'?1:-1)))]?.focus();}else if(e.key==='ArrowRight'&&item.children.length&&!this.expandedList.has(item.id)){e.preventDefault();this.toggleList(item);}else if(e.key==='ArrowLeft'){if(this.expandedList.has(item.id)){e.preventDefault();this.toggleList(item);}else if(parent){e.preventDefault();[...this.element.querySelectorAll('.task-list-row')].find(r=>r.dataset.task===parent.id)?.querySelector('.task-row-title')?.focus();}}};
@@ -162,7 +162,7 @@ export class TaskPage {
   if(item.details?.due){const due=el('span','task-date');due.append(taskIcon('calendar'),el('span','',this.dateLabel(item.details.due)));due.title=item.details.due;meta.append(due);}
   if(item.children.length){const p=taskCompletion(this.model,item,parent),toggle=button(`${p.completed}/${p.total}`,p.label+' · Show subtasks',()=>{this.collapsed.has(item.id)?this.collapsed.delete(item.id):this.collapsed.add(item.id);this.render();},'task-progress');toggle.prepend(taskCompletionRing(this.model,item,parent,true));toggle.setAttribute('aria-expanded',String(!this.collapsed.has(item.id)));meta.append(toggle);}else{const progress=el('span','task-progress');progress.append(taskCompletionRing(this.model,item,parent));meta.append(progress);}
   if(this.view==='list')meta.append(this.statusSelect(item,parent));
-  const work=workBadge(this,item);if(work)meta.prepend(work);
+  const priority=priorityBadge(item);if(priority)meta.prepend(priority);const work=workBadge(this,item);if(work)meta.prepend(work);
   meta.append(button('','Open task details',()=>this.openDetail(item),'task-quiet-action task-more','more'));card.append(meta);return card;
  }
  dateLabel(date){const d=new Date(date+'T12:00:00');return isNaN(d)?date:d.toLocaleDateString(undefined,{month:'short',day:'numeric'});}

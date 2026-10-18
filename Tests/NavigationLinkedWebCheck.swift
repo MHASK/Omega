@@ -97,6 +97,21 @@ import WebKit
         try await wait { notebook.checklistFolder==nil && notebook.selected==taskURL && !notebook.navigating }
         try await wait { try await js(web,"document.querySelector('.task-detail-title')?.value==='Shape an idea'") as? Bool == true }
         print("PASS: Forward restores the linked task detail")
+        let api = AssistantService(notebook)
+        func call(_ name: String, _ arguments: [String: Any]) async throws -> [String: Any] {
+            let response: [String: Any] = await withCheckedContinuation { continuation in
+                api.handle(["name": name, "arguments": arguments]) { continuation.resume(returning: $0) }
+            }
+            guard response["isError"] as? Bool == false, let result = response["structuredContent"] as? [String: Any] else { throw TaskPageError("Editor API failed: \(response)") }
+            return result
+        }
+        let observed = try await call("read_task", ["path": taskURL.path, "task_id": "idea"])
+        let receipt = try await call("edit_tasks", ["path": taskURL.path, "operations": [["op": "update", "task_id": "idea", "expected_task_revision": observed["task_revision"]!, "priority": 1], ["op": "add", "parent_id": "idea", "title": "Check the finished page", "priority": 2]]])
+        try require(receipt["tasks"] == nil && (receipt["items"] as? [[String: Any]])?.count == 2,"visible-editor batch returns only two changed-task receipts")
+        try await wait { try await js(web,"document.querySelector('[aria-label=\"Task priority\"]')?.value==='1' && window.folio.snapshot().text.includes('Check the finished page')") as? Bool == true }
+        let saved = try TaskDocument(markdown: String(contentsOf: taskURL, encoding: .utf8))
+        try require(saved.references.first { $0.details.id == "idea" }?.details.extra["omegaPriority"] == .number(1) && saved.references.contains { $0.title == "Check the finished page" },"atomic task batch updates the visible WebKit editor and saved Markdown together")
+
         notebook.travelNavigation(forward:false)
         try await wait { notebook.checklistFolder==root && !notebook.navigating }
         notebook.select(noteURL)

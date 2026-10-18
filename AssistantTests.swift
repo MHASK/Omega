@@ -191,6 +191,7 @@ import Foundation
         print("PASS: folder ordering persists across restart and rename without altering files")
         print("PASS: MCP tasks/subtasks/goals CRUD, custom statuses, completion migration, stale revisions, history, archive/favorites, persistent settings and stale-settings protection")
         try runWorkCoordinationTests()
+        try runTaskAPITests()
         let visible = URL(fileURLWithPath: renamed["path"] as! String)
         store.select(visible); store.edit("# In progress\n\nHuman keystrokes")
         let latest = call("read_note", ["path": visible.path])

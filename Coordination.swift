@@ -16,6 +16,9 @@ enum TaskCoordination {
         for key in textFields where details.extra[key] != nil {
             guard case .string(let value) = details.extra[key], value.utf16.count <= (key == "omegaHandoff" ? 12000 : 200), !value.contains("\0") else { throw TaskPageError("Invalid work field: " + key) }
         }
+        if let priority = details.extra["omegaPriority"] {
+            guard case .number(let n) = priority, n.isFinite, n.rounded() == n, (0...4).contains(n) else { throw TaskPageError("Choose priority P0–P4.") }
+        }
         if let review = details.extra["omegaReview"], case .bool = review {} else if details.extra["omegaReview"] != nil { throw TaskPageError("Invalid review state.") }
         if let raw = details.extra["omegaDependencies"] {
             guard case .array(let values) = raw, values.count <= 32 else { throw TaskPageError("Use at most 32 dependencies.") }

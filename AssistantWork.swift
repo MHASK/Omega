@@ -3,6 +3,7 @@ import Foundation
 extension FolioMCP {
     static let workMutationNames: Set<String> = ["set_task_dependencies", "configure_task_work", "claim_task", "release_task", "handoff_task", "ensure_task_identity"]
     static let workFields: [String: Any] = [
+        "priority": priority,
         "assignee": property("Person or agent responsible. Empty clears. Up to 200 characters."),
         "blocker": property("What is preventing progress. Empty clears."),
         "handoff": property("Persistent summary: decisions, completed work, tests, and next steps. Up to 12,000 characters."),
@@ -55,19 +56,38 @@ extension FolioMCP {
         let root = try resolve(args["path"] as! String, folder: true), (snapshot, warnings) = try workSnapshot(root)
         let allowed = ["ready", "blocked", "claimed", "assigned", "working", "review", "done", "draft"]
         if let state = args["state"] as? String, !allowed.contains(state) { throw AssistantError("Unknown work state.") }
+        let revisions = Dictionary(uniqueKeysWithValues: snapshot.sources.map { ($0.key, AssistantWire.hash($0.text)) })
+        let queueRevision = AssistantWire.hash(revisions.map { $0.key + ":" + $0.value }.sorted().joined(separator: "\n") + String(decoding: AssistantWire.json(["statuses": snapshot.document.statuses, "completed": snapshot.document.completedStatus]), as: UTF8.self))
+        if let expected = args["expected_queue_revision"] as? String, expected != queueRevision { throw AssistantError("The queue changed while paging. Start at offset 0 again.") }
         let graph = TaskCoordination.Graph(snapshot.document)
         var rows: [[String: Any]] = []
+        let lookup = Dictionary(uniqueKeysWithValues: snapshot.sources.map { ($0.key, $0) })
         for ref in snapshot.document.references where ref.kind != "goal" {
             let state = graph.state(ref)
             if let filter = args["state"] as? String, state != filter { continue }
-            let source = snapshot.sources.first { $0.key == FolderTaskSnapshot.string(ref.details.extra["_folderSource"]) }!
-            let id = FolderTaskSnapshot.string(ref.details.extra["_folderID"])!
-            let original = source.document.references.first { ($0.details.id ?? FolderTaskSnapshot.legacyID(source.key, $0.reference)) == id }!
-            var row: [String: Any] = ["path": source.url.path, "revision": AssistantWire.hash(source.text), "reference": original.reference, "id": id, "durable_id": source.persistedIDs.contains(id), "title": ref.title, "status": original.status ?? "", "state": state, "details": try JSONSerialization.jsonObject(with: JSONEncoder().encode(original.details))]
-            row["claim_scope"] = "Single designated Omega Mac; all claiming agents must use this authority."
+            guard let key = FolderTaskSnapshot.string(ref.details.extra["_folderSource"]), let source = lookup[key],
+                  let id = FolderTaskSnapshot.string(ref.details.extra["_folderID"]),
+                  let original = source.document.references.first(where: { ($0.details.id ?? FolderTaskSnapshot.legacyID(source.key, $0.reference)) == id }) else { continue }
+            if let label = args["label"] as? String, !(original.details.labels ?? []).contains(where: { $0.caseInsensitiveCompare(label) == .orderedSame }) { continue }
+            if let status = args["status"] as? String, original.status != status { continue }
+            if let priority = args["priority"] as? Int, Self.priorityOf(original.details) != priority { continue }
+            let owner = TaskCoordination.claim(original.details).flatMap { TaskCoordination.string($0["owner"]) } ?? TaskCoordination.text(original.details, "omegaAssignee")
+            if let assignee = args["assignee"] as? String, owner.caseInsensitiveCompare(assignee) != .orderedSame { continue }
+            if let query = args["query"] as? String, !(original.title + " " + (original.details.description ?? "")).localizedCaseInsensitiveContains(query) { continue }
+            var row = try taskSummary(original, source: source, details: args["include_details"] as? Bool == true)
+            row["path"] = source.url.path; row["revision"] = revisions[source.key]!; row["state"] = state
+            row["assignee"] = owner; row["blocker"] = TaskCoordination.text(original.details, "omegaBlocker")
+            row["dependencies"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(TaskCoordination.dependencies(original.details)))
             rows.append(row)
         }
-        return ["tasks": rows, "warnings": warnings, "folder": root.path]
+        rows.sort { a, b in
+            let ap = a["priority"] as? Int ?? 2, bp = b["priority"] as? Int ?? 2
+            if ap != bp { return ap < bp }
+            return (a["path"] as! String, a["reference"] as! String) < (b["path"] as! String, b["reference"] as! String)
+        }
+        let offset = args["offset"] as? Int ?? 0, limit = args["limit"] as? Int ?? 50
+        let page = Array(rows.dropFirst(min(offset, rows.count)).prefix(limit))
+        return ["tasks": page, "total": rows.count, "next_offset": offset < rows.count && page.count < rows.count - offset ? offset + page.count : NSNull(), "queue_revision": queueRevision, "warnings": warnings, "folder": root.path, "claim_scope": "Single designated Omega Mac; all claiming agents must use this authority."]
     }
     func requireClaimAuthority(_ url: URL) throws {
         // A Git replica cannot issue independent offline claims. A deliberately
@@ -86,12 +106,14 @@ extension FolioMCP {
             throw AssistantError("This is a shared notebook. In Settings → Assistants, designate one Mac as its task coordinator. All claiming agents must connect to that Mac; offline replicas cannot issue exclusive claims.")
         }
     }
-    func mutateWork(_ name: String, _ args: [String: Any], completion: @escaping ([String: Any]) -> Void) throws {
-        let url = try resolve(args["path"] as! String, folder: false); try checkRevision(url, args)
+    func mutateWork(_ name: String, _ input: [String: Any], completion: @escaping ([String: Any]) -> Void) throws {
+        let url = try resolve(input["path"] as! String, folder: false)
         guard !notebook.isArchived(url) else { throw AssistantError("Restore this page before assigning work.") }
         let text = try String(contentsOf: url, encoding: .utf8), source = try FolderTaskSource(url: url, text: text, preferences: notebook.taskPreferences)
+        let args = try taskTarget(input, source: source)
+        try checkRevision(url, args)
         var document = source.document
-        let reference = args["reference"] as! String
+        guard let reference = args["reference"] as? String else { throw AssistantError("Supply a task reference with its page revision, or a durable task ID and task revision.") }
         guard let ref = document.references.first(where: { $0.reference == reference && $0.kind != "goal" }) else { throw AssistantError("Choose a task from a fresh work queue.") }
         if let claim = TaskCoordination.claim(ref.details), name != "claim_task", name != "ensure_task_identity" {
             guard let token = args["claim_token"] as? String, token == FolderTaskSnapshot.string(claim["token"]) else { throw AssistantError("This task is claimed. Supply its claim receipt or ask the owner to hand it off.") }
@@ -134,6 +156,7 @@ extension FolioMCP {
             let fields = ["assignee": "omegaAssignee", "blocker": "omegaBlocker", "handoff": "omegaHandoff", "repository": "omegaRepository", "branch": "omegaBranch", "session": "omegaSession", "pull_request": "omegaPR"]
             try document.updateDetails(reference) { d in
                 for (key, meta) in fields { if let value = args[key] as? String { d.extra[meta] = value.isEmpty ? nil : .string(value) } }
+                try Self.applyPriority(args, to: &d)
                 if let review = args["needs_review"] as? Bool { d.extra["omegaReview"] = review ? .bool(true) : nil }
                 if name == "release_task" || name == "handoff_task" { d.extra.removeValue(forKey: "omegaClaim"); d.extra.removeValue(forKey: "omegaAssignee") }
                 if name == "handoff_task" { d.extra["omegaReview"] = args["needs_review"] as? Bool == false ? nil : .bool(true) }
@@ -149,7 +172,7 @@ extension FolioMCP {
         try update(["path": url.path, "expected_revision": args["expected_revision"]!, "markdown": next]) { response in
             if response["isError"] as? Bool == true { completion(response); return }
             do {
-                var result = try self.taskPage(url); result["item_id"] = id
+                var result = args["response_format"] as? String == "compact" ? try self.taskReceipt(url, ids: [id]) : try self.taskPage(url); result["item_id"] = id
                 if let receipt { result["claim_token"] = receipt }
                 completion(FolioMCP.success(result))
             } catch { completion(FolioMCP.failure(error.localizedDescription)) }

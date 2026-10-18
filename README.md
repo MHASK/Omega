@@ -102,8 +102,8 @@ does not start an agent, make a worktree, initialize Beads, or change global
 client configuration. Keep Omega open with assistant access enabled.
 
 Agents call `get_context`, `read_work_queue`, and `claim_task`, then keep the
-returned receipt for updates, release and handoff. Mutations require the exact
-source revision. A timeout must be followed by a fresh read, never a blind retry.
+returned claim receipt for updates, release and handoff. Mutations require the exact
+task revision (or the legacy source revision). A timeout must be followed by a fresh read, never a blind retry.
 Ready means unassigned, unclaimed, saved work in the first open status, with
 every prerequisite complete. Drafts, missing dependencies, dependency loops,
 explicit blockers, review work, and already-started tasks are excluded.
@@ -120,6 +120,43 @@ to the first open status and pass `needs_review: false`. Claims do not expire or
 get stolen automatically. A stopped agent's receipt is retained in the task
 metadata for deliberate recovery through `read_task_page` and `release_task`.
 
+For agent work, prefer `read_task(path, task_id)` and then pass `task_id` plus
+`expected_task_revision` to `update_task`, `configure_task_work`, `claim_task`,
+`handoff_task`, or dependency tools. These calls default to compact receipts;
+changes to unrelated tasks do not invalidate the token. A change to the same
+task, its ancestry, or the page's status configuration does. Legacy positional
+calls still require `expected_revision` and return a full page unless you pass
+`response_format: "compact"`. Raw Markdown replacement always guards the whole
+page. Read a legacy task by reference and use `ensure_task_identity` first.
+
+`edit_tasks` validates up to 100 add/update operations in memory, then saves
+**one page atomically** through the normal editor, backup, recovery and undo
+path. Updates carry their own task revisions; additions append to the latest
+page. An optional page revision guards the entire batch. Use `client_id` on an
+add and `parent_id: "$client_id"` on a later add for nested tasks in one call.
+An invalid operation, stale token or missing claim receipt rejects the batch.
+A timeout is ambiguous: inspect the tasks before attempting additions again.
+Cross-page transactions and distributed writes are not supported.
+
+The queue supports `state`, `status`, `label`, `assignee`, `query`, and `priority`
+filters. Results default to 50 compact summaries, ordered by P0–P4 (unspecified
+priority sorts with P2). Follow `next_offset`; pass `expected_queue_revision`
+from the previous result to detect changes while paging. `include_details: true`
+returns full metadata; use `read_task` for one task's context. Priority is editable
+in **Work & handoff**, visible on cards/lists, and preserved in Markdown and live
+collaboration. The Ready view sorts by priority.
+
+The same API works from the shell while Omega is open:
+
+```sh
+printf '%s' '{"path":"/absolute/notebook","state":"ready","label":"pr"}' | \
+  /Applications/Omega.app/Contents/MacOS/Folio --agent-call read_work_queue
+```
+
+After an app update, reconnect `folio` in the client's MCP menu (or start a new
+session) to refresh its tool schema. Reading a file with shell commands proves
+the file exists; it does not test the MCP connection.
+
 **Claim coordination is local to one Mac.** The same-user MCP service serializes
 claims; Git and live editing are not a distributed lock service. For a shared
 Git/live notebook, **Use this Mac…** records the coordinator in
@@ -133,15 +170,16 @@ implemented.
 To migrate an existing [Beads](https://github.com/gastownhall/beads) project,
 run `bd export --no-memories -o omega-beads.jsonl` in that project, then choose
 **Import Beads…**. Review the preview before creating a new task page. Hierarchy,
-blocking dependencies, supported statuses, labels, assignees and handoff notes
-are mapped into Omega. Original records—including comments, priorities and
+blocking dependencies, supported statuses, P0–P4 priorities, labels, assignees and handoff notes
+are mapped into Omega. Original records—including comments and
 other Beads fields—remain in metadata; unsupported relationships are flagged for
 review. Missing prerequisites remain blocked. The original Beads project is
 unchanged. This is a **one-time import**, not bidirectional Beads synchronization
 or full Beads feature parity. After verifying it, choose one task authority for
 ongoing work.
 
-These additions are on the development branch, not the published Mac release.
+Agent coordination and Beads import shipped in 1.3.13. The compact task API,
+batches and priority controls are included in 1.3.14.
 Regression checks cover claim competition, stale revisions, ownership receipts,
 dependency loops, missing and cross-page targets, inline checklist preservation,
 idempotent setup, actual Beads 1.0.3 export records, concurrent handoffs, and the
