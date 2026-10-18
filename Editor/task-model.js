@@ -1,4 +1,5 @@
 export const taskMarker='<!-- folio:tasks -->';
+export const isCompleted=(model,status)=>[model.completed,...(model.completedAlso||[])].includes(typeof status==='number'?model.statuses[status]:status);
 export const defaultStatuses=['To do','In progress','Done'];
 const validStatus=name=>typeof name==='string'&&!!name&&name.length<=40&&name===name.trim()&&!/[\r\n<>#]/.test(name)&&name.toLowerCase()!=='goals';
 let sequence=0;
@@ -44,6 +45,8 @@ export function validDetails(value,child=false){
  if(value.draft!==undefined&&typeof value.draft!=='boolean')return false;
  for(const key of ['omegaAssignee','omegaBlocker','omegaHandoff','omegaRepository','omegaBranch','omegaSession','omegaPR'])if(value[key]!==undefined&&(typeof value[key]!=='string'||value[key].length>(key==='omegaHandoff'?12000:200)||value[key].includes('\0')))return false;
  if(value.omegaPriority!==undefined&&(!Number.isInteger(value.omegaPriority)||value.omegaPriority<0||value.omegaPriority>4))return false;
+ if(value.omegaAudience!==undefined&&!['agent','human'].includes(value.omegaAudience))return false;
+ if(value.omegaClaim?.expires!==undefined&&(!Number.isFinite(value.omegaClaim.expires)||value.omegaClaim.expires<=0))return false;
  if(value.omegaReview!==undefined&&typeof value.omegaReview!=='boolean')return false;
  if(value.omegaClaim!==undefined&&(!value.omegaClaim||typeof value.omegaClaim!=='object'||['owner','token','at'].some(k=>typeof value.omegaClaim[k]!=='string'||!value.omegaClaim[k]||value.omegaClaim[k].length>200||value.omegaClaim[k].includes('\0'))))return false;
  if(value.omegaDependencies!==undefined){const ds=value.omegaDependencies;if(!Array.isArray(ds)||ds.length>32||ds.some(d=>!d||typeof d!=='object'||Object.keys(d).some(k=>!['id','path'].includes(k))||typeof d.id!=='string'||! /^[\w-]{1,80}$/.test(d.id)||d.path!==undefined&&(typeof d.path!=='string'||d.path.length>2000||d.path.startsWith('/')||/[\\\0]/.test(d.path)))||new Set(ds.map(d=>(d.path||'')+'#'+d.id)).size!==ds.length)return false;}
@@ -63,6 +66,7 @@ function parseTaskDocument(text,fail,setLine){
  for(let index=first+1;index<lines.length;index++){
   setLine(index+1);let line=lines[index];if(!line.trim())continue;
   if(!titleSeen&&line.startsWith('<!-- folio:completed ')&&line.trimEnd().endsWith(' -->')){try{model.completed=JSON.parse(line.trimEnd().slice(21,-4));}catch{return fail('The completed status must be a quoted name.');}if(!validStatus(model.completed))return fail('The completed status name is invalid.');continue;}
+  if(!titleSeen&&line.startsWith('<!-- folio:completed-also ')&&line.trimEnd().endsWith(' -->')){try{if(model.completedAlso)return fail('Repeated completed statuses.');model.completedAlso=JSON.parse(line.trimEnd().slice(26,-4));}catch{return fail('Invalid completed statuses.');}if(!Array.isArray(model.completedAlso)||!model.completedAlso.length||model.completedAlso.some(s=>!validStatus(s)))return fail('Invalid completed statuses.');continue;}
   if(!titleSeen&&line.startsWith('# ')){model.title=line.slice(2);titleSeen=true;continue;}
   if(line.startsWith('## ')){section=line.slice(3);if(!titleSeen)return fail('Add the page title before its sections.');if(section!=='Goals'&&!validStatus(section))return fail('Use a valid status name for this section.');if(seen.has(section.toLowerCase()))return fail('This section name is repeated.');seen.add(section.toLowerCase());if(section!=='Goals')model.statuses.push(section);stack=[];target=null;continue;}
   if(/^ *<!-- folio:task(?:\s|$)/.test(line)){
@@ -95,15 +99,16 @@ function parseTaskDocument(text,fail,setLine){
  if(!model.statuses.length)model.statuses=[...defaultStatuses];
  if(!model.statuses.includes(model.completed))model.statuses.push(model.completed);
  for(const {item} of walkTasks(model))if(item.details.status&&!model.statuses.includes(item.details.status))model.statuses.push(item.details.status);
+ if(model.completedAlso&&(new Set([model.completed,...model.completedAlso]).size!==model.completedAlso.length+1||model.completedAlso.some(s=>!model.statuses.includes(s))))return fail('Choose distinct completed statuses from this page.');
  if(model.statuses.length>12||new Set(model.statuses.map(s=>s.toLowerCase())).size!==model.statuses.length)return fail('Use at most 12 status names, with no names differing only in capitalization.');
  for(const item of model.tasks)if(item.details.status!==undefined){
-  item.status=model.statuses.indexOf(item.details.status);item.done=item.details.status===model.completed;delete item.details.status;
+  item.status=model.statuses.indexOf(item.details.status);item.done=isCompleted(model,item.details.status);delete item.details.status;
  }
  // Temporary UI identities must never collide with a real externally assigned ID.
  for(const item of [...model.goals,...walkTasks(model).map(e=>e.item)])if(!item.details.id){let id=item.id;while(ids.has(id))id=`legacy-${++legacy}`;item.id=id;ids.add(id);}
  return {model,issue:null};
 }
-export function subtaskStatus(model,child){return model.statuses.indexOf(child.details?.status||(child.done?model.completed:model.statuses.find(s=>s!==model.completed)||model.completed));}
+export function subtaskStatus(model,child){return model.statuses.indexOf(child.details?.status||(child.done?model.completed:model.statuses.find(s=>!isCompleted(model,s))||model.completed));}
 // Move the same object and subtree; never rebuild a task from visible fields.
 export function reparentTask(model,id,parentID=null){
  const entries=walkTasks(model),found=entries.find(e=>e.item.id===id),next=parentID?entries.find(e=>e.item.id===parentID):null;
@@ -115,7 +120,7 @@ export function reparentTask(model,id,parentID=null){
  const previous=found.parent?found.parent.children:model.tasks;
  previous.splice(previous.indexOf(found.item),1);
  if(!found.item.details.id){found.item.id=newTaskID();found.item.details.id=found.item.id;}
- found.item.done=status===model.statuses.indexOf(model.completed);
+ found.item.done=isCompleted(model,status);
  if(next){found.item.details.status=model.statuses[status];next.item.children.push(found.item);delete found.item.status;}
  else{delete found.item.details.status;found.item.status=status;model.tasks.push(found.item);}
  return found.item;
@@ -127,8 +132,8 @@ export function serializeTasks(model){
   const json=JSON.stringify(details).replace(/</g,'\\u003c').replace(/>/g,'\\u003e');
   return '\n'+'  '.repeat(depth+1)+'<!-- folio:task '+json+' -->';
  };
- const row=(item,depth,status)=>'  '.repeat(depth)+check(item,status===model.statuses.indexOf(model.completed))+metadata(item,depth)+(item.children||[]).map(child=>'\n'+row(child,depth+1,subtaskStatus(model,child))).join('');
- let text=taskMarker+'\n'+(model.completed!=='Done'?'<!-- folio:completed '+JSON.stringify(model.completed)+' -->\n':'')+'# '+clean(model.title)+'\n\n## Goals\n\n';
+ const row=(item,depth,status)=>'  '.repeat(depth)+check(item,isCompleted(model,status))+metadata(item,depth)+(item.children||[]).map(child=>'\n'+row(child,depth+1,subtaskStatus(model,child))).join('');
+ let text=taskMarker+'\n'+(model.completed!=='Done'?'<!-- folio:completed '+JSON.stringify(model.completed)+' -->\n':'')+(model.completedAlso?.length?'<!-- folio:completed-also '+JSON.stringify(model.completedAlso)+' -->\n':'')+'# '+clean(model.title)+'\n\n## Goals\n\n';
  text+=model.goals.map(item=>check(item,goalProgress(model,item).done)+metadata(item,0)).join('\n');
  model.statuses.forEach((status,index)=>{text+='\n\n## '+status+'\n\n';text+=model.tasks.filter(task=>task.status===index).map(task=>row(task,0,index)).join('\n');});
  return text.trimEnd()+'\n';
@@ -138,7 +143,7 @@ export function serializeTasks(model){
 // of truth; linking a parent never silently completes or links its descendants.
 export function goalProgress(model,goal){
  const entries=walkTasks(model).filter(({item})=>goal.details.id&&(item.details.goals||[]).includes(goal.details.id));
- const completed=entries.filter(({item,parent})=>(parent?subtaskStatus(model,item):item.status)===model.statuses.indexOf(model.completed)).length;
+ const completed=entries.filter(({item,parent})=>isCompleted(model,parent?subtaskStatus(model,item):item.status)).length;
  return {entries,total:entries.length,completed,done:entries.length?completed===entries.length:goal.done};
 }
 export function linkGoal(model,item,goal,linked){

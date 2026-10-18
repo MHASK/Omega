@@ -12,7 +12,16 @@ enum TaskCoordination {
     static func claim(_ details: TaskDetails) -> [String: TaskJSON]? {
         if case .object(let o) = details.extra["omegaClaim"] { return o }; return nil
     }
+    static func audience(_ details: TaskDetails) -> String {
+        if let explicit = string(details.extra["omegaAudience"]) { return explicit }
+        return (details.labels ?? []).contains { ["you", "human"].contains($0.lowercased()) } ? "human" : "agent"
+    }
+    static func expired(_ details: TaskDetails, at now: Date = Date()) -> Bool {
+        guard let record = claim(details), case .number(let expiry) = record["expires"] else { return false }
+        return expiry <= now.timeIntervalSince1970
+    }
     static func validate(_ details: TaskDetails) throws {
+        if let v = details.extra["omegaAudience"], ![TaskJSON.string("agent"), .string("human")].contains(v) { throw TaskPageError("Choose agent or human work.") }
         for key in textFields where details.extra[key] != nil {
             guard case .string(let value) = details.extra[key], value.utf16.count <= (key == "omegaHandoff" ? 12000 : 200), !value.contains("\0") else { throw TaskPageError("Invalid work field: " + key) }
         }
@@ -33,16 +42,17 @@ enum TaskCoordination {
             guard case .object(let record) = value, ["owner", "token", "at"].allSatisfy({ key in
                 guard let s = string(record[key]) else { return false }; return !s.isEmpty && s.utf16.count <= 200 && !s.contains("\0")
             }) else { throw TaskPageError("Invalid task claim.") }
+            if let expiry = record["expires"] { guard case .number(let n) = expiry, n.isFinite, n > 0 else { throw TaskPageError("Invalid claim expiry.") } }
         }
     }
     struct Graph {
         let byID: [String: [TaskReference]]
         let cyclic: Set<String>
-        let completed: String
+        let completed: Set<String>
         let firstOpen: String?
         init(_ document: TaskDocument) {
-            completed = document.completedStatus
-            firstOpen = document.statuses.first { $0 != document.completedStatus }
+            completed = Set(document.completedStatuses)
+            firstOpen = document.statuses.first { !document.isCompleted($0) }
             let lookup = Dictionary(grouping: document.references.filter { $0.kind != "goal" && $0.details.id != nil }, by: { $0.details.id! })
             byID = lookup
             var remaining: [String: Int] = [:], dependents: [String: [String]] = [:]
@@ -62,16 +72,16 @@ enum TaskCoordination {
         }
         func state(_ ref: TaskReference) -> String {
             if ref.details.draft == true { return "draft" }
-            if ref.status == completed { return "done" }
+            if completed.contains(ref.status ?? "") { return "done" }
             if let id = ref.details.id, cyclic.contains(id) { return "blocked" }
             if !text(ref.details, "omegaBlocker").isEmpty || dependencies(ref.details).contains(where: { dep in
                 guard dep["path"] == nil, let id = string(dep["id"]), let targets = byID[id], targets.count == 1 else { return true }
-                return targets[0].status != completed
+                return !completed.contains(targets[0].status ?? "")
             }) { return "blocked" }
             if ref.details.extra["omegaReview"] == .bool(true) { return "review" }
-            if claim(ref.details) != nil { return "claimed" }
+            if claim(ref.details) != nil { return expired(ref.details) ? "recoverable" : "claimed" }
             if !text(ref.details, "omegaAssignee").isEmpty { return "assigned" }
-            return ref.status == firstOpen ? "ready" : "working"
+            return ref.status == firstOpen ? (audience(ref.details) == "human" ? "human" : "ready") : "working"
         }
     }
     static func state(_ ref: TaskReference, in document: TaskDocument) -> String { Graph(document).state(ref) }

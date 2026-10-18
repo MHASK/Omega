@@ -1,7 +1,10 @@
+import {isCompleted} from './task-model.js';
 import {walkTasks,subtaskStatus} from './task-model.js';
 
 // Coordination is stored with the original task, including inline checklists.
 // Claims are issued by the native authority, never by a CRDT last-write-wins edit.
+export const audience=item=>item.details?.omegaAudience||((item.details?.labels||[]).some(s=>['you','human'].includes(s.toLowerCase()))?'human':'agent');
+export const expired=item=>typeof item.details?.omegaClaim?.expires==='number'&&item.details.omegaClaim.expires<=Date.now()/1000;
 export const dependencies=item=>item?.details?.omegaDependencies||[];
 export function workGraph(model){
  const entries=walkTasks(model),byID=new Map(entries.map(e=>[e.item.id,e])),remaining=new Map(),dependents=new Map();
@@ -10,10 +13,10 @@ export function workGraph(model){
  for(const {item} of entries){const edges=dependencies(item).filter(d=>!d.path&&byID.has(d.id));remaining.set(item.id,edges.length);for(const d of edges){if(!dependents.has(d.id))dependents.set(d.id,[]);dependents.get(d.id).push(item.id);}}
  const queue=[...remaining].filter(([,n])=>n===0).map(([id])=>id);
  for(let i=0;i<queue.length;i++)for(const id of dependents.get(queue[i])||[]){remaining.set(id,remaining.get(id)-1);if(remaining.get(id)===0)queue.push(id);}
- const completed=model.statuses.indexOf(model.completed),first=model.statuses.findIndex(s=>s!==model.completed),status=e=>e.parent?subtaskStatus(model,e.item):e.item.status;
+ const completed=model.statuses.indexOf(model.completed),first=model.statuses.findIndex(s=>!isCompleted(model,s)),status=e=>e.parent?subtaskStatus(model,e.item):e.item.status;
  return item=>{
-  const found=byID.get(item.id),blockers=dependencies(item).filter(dep=>dep.path||!byID.has(dep.id)||status(byID.get(dep.id))!==completed),cyclic=(remaining.get(item.id)||0)>0;
-  const state=!found||item.details?.draft?'draft':status(found)===completed?'done':cyclic||blockers.length||item.details?.omegaBlocker?'blocked':item.details?.omegaReview?'review':item.details?.omegaClaim?'claimed':item.details?.omegaAssignee?'assigned':status(found)!==first?'working':'ready';
+  const found=byID.get(item.id),blockers=dependencies(item).filter(dep=>dep.path||!byID.has(dep.id)||!isCompleted(model,status(byID.get(dep.id)))),cyclic=(remaining.get(item.id)||0)>0;
+  const state=!found||item.details?.draft?'draft':isCompleted(model,status(found))?'done':cyclic||blockers.length||item.details?.omegaBlocker?'blocked':item.details?.omegaReview?'review':item.details?.omegaClaim?(expired(item)?'recoverable':'claimed'):item.details?.omegaAssignee?'assigned':status(found)!==first?'working':audience(item)==='human'?'human':'ready';
   return {state,blockers,cyclic,ready:state==='ready'};
  };
 }
@@ -33,8 +36,8 @@ export function priorityBadge(item){
 }
 export function workBadge(view,item){
  const {state,blockers,cyclic}=(view.workGraph||workGraph(view.model))(item),owner=item.details.omegaClaim?.owner||item.details.omegaAssignee;
- if(!owner&&!['blocked','review'].includes(state))return null;
- const badge=el('span','task-work-badge '+state,cyclic?'Dependency loop':state==='blocked'?'Blocked':state==='review'?'Needs review':owner);
+ if(!owner&&!['blocked','review','human','recoverable'].includes(state))return null;
+ const badge=el('span','task-work-badge '+state,cyclic?'Dependency loop':state==='blocked'?'Blocked':state==='review'?'Needs review':state==='human'?'For a person':state==='recoverable'?'Claim expired':owner);
  badge.title=cyclic?'Remove a circular dependency':item.details.omegaBlocker|| (blockers.some(d=>d.path)?'Open the folder task view to check prerequisites from other pages.':blockers.length?`${blockers.length} unfinished or unavailable dependencies`:owner||'Ready for human review');return badge;
 }
 export function coordinationPanel(view,item){
@@ -48,9 +51,12 @@ export function coordinationPanel(view,item){
  const priority=el('label','task-work-field');priority.append(el('span','','Priority'));const choice=control(el('select'));choice.setAttribute('aria-label','Task priority');
  for(const [value,label] of [[-1,'No priority'],[0,'P0 · Urgent'],[1,'P1 · High'],[2,'P2 · Normal'],[3,'P3 · Low'],[4,'P4 · Backlog']]){const option=el('option','',label);option.value=String(value);choice.append(option);}
  choice.value=String(item.details.omegaPriority??-1);choice.onchange=()=>{const value=Number(choice.value);if(value<0)delete item.details.omegaPriority;else item.details.omegaPriority=value;save();};priority.append(choice);body.append(priority);
+ const audienceField=el('label','task-work-field');audienceField.append(el('span','','Work for'));const audienceChoice=control(el('select'));audienceChoice.setAttribute('aria-label','Work for');
+ for(const [value,label] of [['auto','Automatic from labels'],['agent','An agent'],['human','A person']]){const option=el('option','',label);option.value=value;audienceChoice.append(option);}
+ audienceChoice.value=item.details.omegaAudience||'auto';audienceChoice.onchange=()=>{if(audienceChoice.value==='auto')delete item.details.omegaAudience;else item.details.omegaAudience=audienceChoice.value;save();};audienceField.append(audienceChoice);body.append(audienceField);
  const owner=field('Assigned to','omegaAssignee','Person or agent');
  field('Waiting on','omegaBlocker','Describe a blocker, if there is one');
- if(item.details.omegaClaim){owner.disabled=true;delete owner.dataset.mutates;body.append(el('p','task-work-hint',`Claimed by ${item.details.omegaClaim.owner}. Release through the coordinating Omega connection.`));}
+ if(item.details.omegaClaim){owner.disabled=true;delete owner.dataset.mutates;body.append(el('p','task-work-hint',expired(item)?`Claim expired for ${item.details.omegaClaim.owner}. Read the handoff before reclaiming through Omega.`:`Claimed by ${item.details.omegaClaim.owner}.${item.details.omegaClaim.expires?' Expires '+new Date(item.details.omegaClaim.expires*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'. Renew through Omega before it expires.':' Legacy claim; release through Omega.'}`));}
  const deps=el('div','task-work-dependencies');deps.append(el('span','task-section-label','Blocked by'));
  for(const dep of dependencies(item)){
   const target=!dep.path&&view.lookup(dep.id)?.item,row=el('div','task-dependency-row'),open=el('button','',target?.title||(dep.path?'Open '+dep.path+' ↗':'Unavailable task · '+dep.id));open.type='button';open.disabled=!target&&!(dep.path&&view.options.open);open.title=dep.path?'Check readiness in the folder task view · '+dep.id:'';open.onclick=()=>target?view.openDetail(target):view.options.open?.(dep.path.split('/').map(encodeURIComponent).join('/')+'#folio-task-'+dep.id);row.append(open);

@@ -106,7 +106,15 @@ returned claim receipt for updates, release and handoff. Mutations require the e
 task revision (or the legacy source revision). A timeout must be followed by a fresh read, never a blind retry.
 Ready means unassigned, unclaimed, saved work in the first open status, with
 every prerequisite complete. Drafts, missing dependencies, dependency loops,
-explicit blockers, review work, and already-started tasks are excluded.
+explicit blockers, review work, human work, and already-started tasks are excluded.
+Set **Work for** to **A person** or **An agent**, or pass `audience` in task edits.
+Without an explicit choice, YOU/HUMAN labels count as human work; other tasks are agent eligible.
+The Ready view has separate **For agents**, **For people**, and **Recoverable** queues.
+
+In Settings → Tasks & goals, check each status that counts as complete and choose
+a default for checkboxes. For example, Merged and Done can both contribute to
+progress and unblock dependencies. The API accepts `completed_statuses` alongside
+`completed_status` (the default). Merely naming a status Merged never silently completes it.
 Cross-page prerequisites must have durable IDs; `ensure_task_identity` and
 `set_task_dependencies` handle this without duplicating tasks. Use the folder
 task view or agent queue for cross-page readiness; a single task page
@@ -116,9 +124,13 @@ links to their source.
 `handoff_task` stores decisions, changes, tests and next steps, releases the
 claim, and normally requests human review. It never marks work Done. For an
 unfinished handoff that another agent should pick up, explicitly return the task
-to the first open status and pass `needs_review: false`. Claims do not expire or
-get stolen automatically. A stopped agent's receipt is retained in the task
-metadata for deliberate recovery through `read_task_page` and `release_task`.
+to the first open status and pass `needs_review: false`. New claims have a 30-minute lease. Set
+`lease_seconds` (60–86400) when claiming or renewing with `renew_task_claim`.
+Renew before expiry with the receipt and current task revision. Expired claims
+appear as **Recoverable**, keep their status and handoff, and can be reclaimed
+after reviewing existing work. Old receipts cannot edit or renew after expiry.
+Legacy claims without an expiry remain manual; renew one to opt into a lease.
+A stopped legacy agent's receipt remains in `read_task_page` for deliberate release.
 
 For agent work, prefer `read_task(path, task_id)` and then pass `task_id` plus
 `expected_task_revision` to `update_task`, `configure_task_work`, `claim_task`,
@@ -146,7 +158,20 @@ returns full metadata; use `read_task` for one task's context. Priority is edita
 in **Work & handoff**, visible on cards/lists, and preserved in Markdown and live
 collaboration. The Ready view sorts by priority.
 
-The same API works from the shell while Omega is open:
+Install the short shell command from **Settings → Assistants → Install omega terminal command**,
+or run `/Applications/Omega.app/Contents/MacOS/Folio --install-cli`. It creates
+`~/.local/bin/omega`; add `~/.local/bin` to your shell PATH if needed. Then:
+
+```sh
+omega ready "/absolute/notebook" --label pr
+omega list "/absolute/notebook" --state recoverable --json
+omega show "/absolute/notebook/Tasks.md" TASK_ID
+omega call edit_tasks < edits.json
+```
+
+Inside a project configured by Omega, the notebook argument is optional.
+Use `--json` for exact revisions and compact structured output. The same API also
+works through the original shell interface while Omega is open:
 
 ```sh
 printf '%s' '{"path":"/absolute/notebook","state":"ready","label":"pr"}' | \

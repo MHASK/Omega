@@ -175,7 +175,7 @@ final class Notebook: ObservableObject {
             do {
                 guard self.selected == file else { throw TaskPageError("Return to the task page you opened Settings from, then try again.") }
                 var document = try TaskDocument(markdown: self.text)
-                guard TaskPreferences(statuses: document.statuses, completed: document.completedStatus) == expected else { throw TaskPageError("The page's statuses changed. Reopen Settings to use their latest names.") }
+                guard document.preferences == expected else { throw TaskPageError("The page's statuses changed. Reopen Settings to use their latest names.") }
                 try document.configure(value, renames: renames)
                 let next = document.markdown
                 if let editor = self.richEditor {

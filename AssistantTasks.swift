@@ -2,6 +2,7 @@ import Foundation
 import CoreFoundation
 
 extension FolioMCP {
+    static let audience: [String: Any] = ["type":"string", "enum":["auto","agent","human"], "description":"Intended worker. auto clears the override; legacy YOU/HUMAN labels default to human."]
     static let priority: [String: Any] = ["type": "integer", "minimum": -1, "maximum": 4, "description": "P0 (urgent) through P4 (backlog). -1 clears the priority."]
     static let taskTargetFields: [String: Any] = [
         "task_id": property("Durable task ID from read_task or read_work_queue. Use together with expected_task_revision, without positional references."),
@@ -13,6 +14,7 @@ extension FolioMCP {
         let name = tool["name"] as! String
         if taskMutationNames.contains(name) || workMutationNames.contains(name) {
             fields["response_format"] = taskTargetFields["response_format"]
+            if name == "update_task" || name == "add_task" { fields["audience"] = audience }
             // Structural edits and positional goal links still require a whole-page revision.
             if name == "update_task" || workMutationNames.contains(name) {
                 fields.merge(taskTargetFields) { _, new in new }
@@ -20,9 +22,10 @@ extension FolioMCP {
                 tool["description"] = (tool["description"] as! String) + " Prefer task_id + expected_task_revision for independent task edits and compact receipts; legacy expected_revision + reference is supported."
             }
         }
-        if name == "configure_task_statuses" { fields["claim_token"] = workFields["claim_token"] }
+        if name == "configure_task_statuses" { fields["claim_token"] = workFields["claim_token"]; fields["completed_statuses"] = ["type":"array", "items":["type":"string"], "minItems":1, "maxItems":12, "description":"All statuses that count as complete, including completed_status (the checkbox default). Omitting preserves existing additional completed statuses."] }
         if name == "read_work_queue" {
             fields.merge([
+                "audience": ["type":"string", "enum":["agent","human"], "description":"Filter intended worker. Explicit audience overrides legacy YOU/HUMAN labels."],
                 "label": property("Only tasks with this label (case insensitive)."), "status": property("Exact task status."),
                 "assignee": property("Exact owner/assignee (case insensitive)."), "query": property("Text contained in task title or description."),
                 "priority": ["type": "integer", "minimum": 0, "maximum": 4, "description": "Filter explicit P0–P4 priority."],
@@ -37,7 +40,7 @@ extension FolioMCP {
     static var taskAPITools: [[String: Any]] {
         let fields: [String: Any] = ["op": ["type": "string", "enum": ["add", "update"]], "task_id": taskTargetFields["task_id"]!, "expected_task_revision": taskTargetFields["expected_task_revision"]!,
             "title": property("Task title; required for add."), "status": property("Existing page status."), "completed": property("Completion state; do not combine with status.", type: "boolean"),
-            "client_id": property("Optional unique name for this added task inside this batch."), "parent_id": property("For add: existing parent ID, or $client_id of an earlier add in this batch.")].merging(taskFields) { _, new in new }
+            "client_id": property("Optional unique name for this added task inside this batch."), "parent_id": property("For add: existing parent ID, or $client_id of an earlier add in this batch.")].merging(taskFields) { _, new in new }.merging(["audience":audience]) { _, new in new }
         return [
             tool("read_task", "Read one task or subtask, its durable ID, task revision, details, and direct child IDs. Use ensure_task_identity for legacy tasks before task-level updates. Does not return the whole page.", ["path": path, "task_id": taskTargetFields["task_id"]!, "reference": reference], required: ["path"]),
             tool("edit_tasks", "Atomically add/update up to 100 tasks on ONE page. Updates require task_id + expected_task_revision from a fresh read. Adds append without replacing existing tasks; parent_id may use $client_id from an earlier add. All operations validate before one save; any conflict leaves the page unchanged. Returns compact receipts. Never blindly retry timed-out additions: read the page to check whether they succeeded.", ["path": path, "expected_revision": property("Optional page-wide guard; omit to allow changes to unrelated tasks."), "operations": ["type": "array", "minItems": 1, "maxItems": 100, "items": ["type": "object", "properties": fields, "required": ["op"], "additionalProperties": false]]], required: ["path", "operations"], readOnly: false)
@@ -91,7 +94,7 @@ extension FolioMCP {
             let path = parts.prefix(count).joined(separator: ".")
             return document.references.first { $0.reference == path }?.details.id ?? path
         }
-        let value: [String: Any] = ["title": ref.title, "status": ref.status ?? "", "kind": ref.kind, "details": try JSONSerialization.jsonObject(with: JSONEncoder().encode(ref.details)), "ancestors": ancestors, "statuses": document.statuses, "completed": document.completedStatus]
+        let value: [String: Any] = ["title": ref.title, "status": ref.status ?? "", "kind": ref.kind, "details": try JSONSerialization.jsonObject(with: JSONEncoder().encode(ref.details)), "ancestors": ancestors, "statuses": document.statuses, "completed": document.completedStatuses]
         return AssistantWire.hash(String(decoding: AssistantWire.json(value), as: UTF8.self))
     }
     static func changedTaskIDs(_ before: TaskDocument, _ after: TaskDocument) -> Set<String> {
@@ -109,8 +112,9 @@ extension FolioMCP {
     func taskTarget(_ input: [String: Any], source: FolderTaskSource) throws -> [String: Any] {
         var args = input
         if let id = args["task_id"] as? String {
-            guard args["reference"] == nil, args["task"] == nil, args["parent_task"] == nil, args["parent_reference"] == nil,
-                  let expected = args["expected_task_revision"] as? String, source.persistedIDs.contains(id) else { throw AssistantError("Use a durable task_id with expected_task_revision, without positional references. Ensure legacy identity first.") }
+            guard args["reference"] == nil, args["task"] == nil, args["parent_task"] == nil, args["parent_reference"] == nil else { throw AssistantError("Use task_id without reference or positional task indices.") }
+            guard let expected = args["expected_task_revision"] as? String, !expected.isEmpty else { throw AssistantError("Missing expected_task_revision for task_id. Call read_task and pass its task_revision as expected_task_revision.") }
+            guard source.persistedIDs.contains(id) else { throw AssistantError("Task ID has no durable identity in this page. Use ensure_task_identity on the current reference first.") }
             let ref = try uniqueTask(id, in: source.document)
             guard try Self.taskRevision(ref, in: source.document) == expected else { throw AssistantError("Conflict: this task changed. Read it again and merge your edit.") }
             if let page = args["expected_revision"] as? String, page != AssistantWire.hash(source.text) { throw AssistantError("Conflict: this page changed.") }
@@ -124,6 +128,11 @@ extension FolioMCP {
     func taskSummary(_ ref: TaskReference, source: FolderTaskSource, details: Bool = false) throws -> [String: Any] {
         let id = ref.details.id, durable = id.map { source.persistedIDs.contains($0) } ?? false
         var result: [String: Any] = ["reference": ref.reference, "id": id as Any? ?? NSNull(), "durable_id": durable, "title": ref.title, "status": ref.status ?? "", "labels": ref.details.labels ?? [], "priority": Self.priorityOf(ref.details) as Any? ?? NSNull()]
+        result["audience"] = TaskCoordination.audience(ref.details)
+        if let claim = TaskCoordination.claim(ref.details) {
+            if case .number(let expires) = claim["expires"] { result["claim_expires_at"] = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: expires)) }
+            result["claim_expired"] = TaskCoordination.expired(ref.details)
+        }
         result["task_revision"] = durable ? try Self.taskRevision(ref, in: source.document) : NSNull()
         if details {
             var value = ref.details; value.extra.removeValue(forKey: "omegaClaim")
@@ -143,7 +152,7 @@ extension FolioMCP {
             guard let reference = args["reference"] as? String, let found = source.document.references.first(where: { $0.reference == reference && $0.kind != "goal" }) else { throw AssistantError("Supply task_id or a current reference.") }; ref = found
         }
         var result = try taskSummary(ref, source: source, details: true)
-        result["path"] = url.path; result["revision"] = AssistantWire.hash(source.text); result["statuses"] = source.document.statuses; result["completed_status"] = source.document.completedStatus
+        result["path"] = url.path; result["revision"] = AssistantWire.hash(source.text); result["statuses"] = source.document.statuses; result["completed_status"] = source.document.completedStatus; result["completed_statuses"] = source.document.completedStatuses
         let depth = ref.reference.split(separator: ".").count + 1
         let children = source.document.references.filter { $0.reference.hasPrefix(ref.reference + ".") && $0.reference.split(separator: ".").count == depth }
         result["children"] = children.map { child -> [String: Any] in ["id": child.details.id as Any? ?? NSNull(), "reference": child.reference, "title": child.title] }
@@ -204,5 +213,17 @@ extension FolioMCP {
             if var result = response["structuredContent"] as? [String: Any] { result["created"] = aliases; response = FolioMCP.success(result) }
             completion(response)
         }
+    }
+}
+
+@MainActor extension AssistantService {
+    func additionalCompleted(_ args: [String: Any], document: TaskDocument, renames: [String: String]) throws -> [String]? {
+        let primary = try string(args, "completed_status")
+        if let all = args["completed_statuses"] as? [String] {
+            guard all.contains(primary), Set(all).count == all.count else { throw AssistantError("completed_statuses must include completed_status exactly once, with no duplicates.") }
+            let extra = all.filter { $0 != primary }; return extra.isEmpty ? nil : extra
+        }
+        let extra = (document.completedAlso ?? []).map { renames[$0] ?? $0 }.filter { $0 != primary }
+        return extra.isEmpty ? nil : extra
     }
 }

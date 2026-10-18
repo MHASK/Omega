@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {parseTasks,taskImport,serializeTasks,walkTasks,subtaskStatus,goalProgress} from '../Editor/task-model.js';
+import {parseTasks,taskImport,serializeTasks,walkTasks,subtaskStatus,goalProgress,isCompleted} from '../Editor/task-model.js';
 const base='<!-- folio:tasks -->\n# Shared plan\n\n## Goals\n- [ ] Launch\n  <!-- folio:task {"id":"goal-a","status":"Planning","vendor":{"ticket":42,"archived":false,"empty":null}} -->\n\n## To do\n- [ ] Parent 👋\n  <!-- folio:task {"id":"parent","description":"Keep **formatting** and \\nnewlines","labels":["Writing"],"goals":["goal-a"],"owner":"claude","extra":[1,2.5,null,{"keep":true}]} -->\n  - [x] Child\n    <!-- folio:task {"id":"child","due":"2028-02-29","status":"Review","vendor":{"url":"https://example.com"}} -->\n\n## Done\n- [x] Complete\n';
 const fixtures=[];
 const add=(name,text,accepted,mutate=false)=>fixtures.push({name,text,...(accepted===undefined?{}:{accepted}),mutate});
 add('baseline',base,true);
+for(const [extra,accepted] of [[['Review'],true],[['Done'],false],[['Missing'],false],[[],false],['Review',false]])add('multiple completed '+JSON.stringify(extra),base.replace('\n# Shared plan','\n<!-- folio:completed-also '+JSON.stringify(extra)+' -->\n# Shared plan'),accepted,true);
+
 add('mutation preserves unknown metadata',base,true,true);
 add('BOM and whitespace','\uFEFF\n\n'+base,true);
 add('tight closing comments',base.replaceAll('} -->','}-->'),true);
@@ -49,6 +51,7 @@ for(const [details,accepted] of [
  [{omegaAssignee:'x'.repeat(201)},false],
  [{omegaHandoff:'x'.repeat(12001)},false],
  [{omegaReview:1},false],
+ [{omegaAudience:'human'},true],[{omegaAudience:'agent'},true],[{omegaAudience:'robot'},false],[{omegaClaim:{owner:'A',token:'x',at:'now',expires:1234}},true],[{omegaClaim:{owner:'A',token:'x',at:'now',expires:-1}},false],[{omegaClaim:{owner:'A',token:'x',at:'now',expires:'yesterday'}},false],
  [{omegaPriority:0},true],[{omegaPriority:4},true],[{omegaPriority:-1},false],[{omegaPriority:5},false],[{omegaPriority:1.5},false],[{omegaPriority:true},false],[{omegaPriority:'P1'},false]
 ])add('coordination '+JSON.stringify(details).slice(0,90),base.replace('"owner":"claude"',JSON.stringify(details).slice(1,-1)),accepted,true);
 // Every truncation boundary, not a single hand-picked broken record.
@@ -58,8 +61,8 @@ for(let i=0;i<80;i++){
  add('generated metadata '+i,base.replace(/  <!-- folio:task .*"id":"parent".*? -->/, '  <!-- folio:task '+JSON.stringify(details)+' -->'),true,true);
 }
 function normalized(model){
- const item=(v,parent=false)=>({title:v.title,details:v.details,done:parent?subtaskStatus(model,v)===model.statuses.indexOf(model.completed):v.status===model.statuses.indexOf(model.completed),status:parent?model.statuses[subtaskStatus(model,v)]:model.statuses[v.status],children:v.children.map(c=>item(c,true))});
- return {title:model.title,statuses:model.statuses,completed:model.completed,goals:model.goals.map(g=>({title:g.title,details:g.details,done:goalProgress(model,g).done})),tasks:model.tasks.map(v=>item(v)).sort((a,b)=>model.statuses.indexOf(a.status)-model.statuses.indexOf(b.status))};
+ const item=(v,parent=false)=>({title:v.title,details:v.details,done:parent?isCompleted(model,subtaskStatus(model,v)):isCompleted(model,v.status),status:parent?model.statuses[subtaskStatus(model,v)]:model.statuses[v.status],children:v.children.map(c=>item(c,true))});
+ return {title:model.title,statuses:model.statuses,completed:model.completed,completedAlso:model.completedAlso||[],goals:model.goals.map(g=>({title:g.title,details:g.details,done:goalProgress(model,g).done})),tasks:model.tasks.map(v=>item(v)).sort((a,b)=>model.statuses.indexOf(a.status)-model.statuses.indexOf(b.status))};
 }
 if(process.argv[2]==='--fixtures'){fs.writeFileSync(process.argv[3],JSON.stringify(fixtures));process.exit();}
 let results;

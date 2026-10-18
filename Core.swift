@@ -137,10 +137,14 @@ enum NoteFiles {
 struct TaskPreferences: Codable, Equatable {
     var statuses = ["To do", "In progress", "Done"]
     var completed = "Done"
+    var completedAlso: [String]? = nil
+    var completedStatuses: [String] { [completed] + (completedAlso ?? []) }
+    func isCompleted(_ status: String?) -> Bool { status.map { completedStatuses.contains($0) } ?? false }
     func validate() throws {
         guard !statuses.isEmpty, statuses.count <= 12, Set(statuses.map { $0.lowercased() }).count == statuses.count,
               statuses.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 40 && $0 == $0.trimmingCharacters(in: .whitespacesAndNewlines) && !$0.contains(where: { "\n\r<>#".contains($0) }) && $0.lowercased() != "goals" }), statuses.contains(completed)
         else { throw TaskPageError("Use 1–12 unique status names and choose a completed status. ‘Goals’ is reserved.") }
+        guard completedStatuses.count <= 12, Set(completedStatuses).count == completedStatuses.count, completedStatuses.allSatisfy(statuses.contains) else { throw TaskPageError("Choose distinct completed statuses from this page.") }
     }
 }
 struct TaskPageError: LocalizedError {
@@ -288,10 +292,14 @@ struct TaskDocument: Codable {
     var title: String
     var statuses: [String]
     var completedStatus: String
+    var completedAlso: [String]? = nil
+    var preferences: TaskPreferences { TaskPreferences(statuses: statuses, completed: completedStatus, completedAlso: completedAlso) }
+    var completedStatuses: [String] { preferences.completedStatuses }
+    func isCompleted(_ status: String?) -> Bool { preferences.isCompleted(status) }
     var goals: [TaskCheckItem] = []
     var tasks: [TaskPageItem] = []
     init(title: String = "Tasks", preferences: TaskPreferences = TaskPreferences()) {
-        self.title = title; statuses = preferences.statuses; completedStatus = preferences.completed
+        self.title = title; statuses = preferences.statuses; completedStatus = preferences.completed; completedAlso = preferences.completedAlso
     }
     init(markdown: String) throws {
         let text = markdown.hasPrefix("\u{FEFF}") ? String(markdown.dropFirst()) : markdown
@@ -310,6 +318,11 @@ struct TaskDocument: Codable {
                 let json = String(line.trimmingCharacters(in: .whitespaces).dropFirst(21).dropLast(4))
                 guard let value = try? JSONDecoder().decode(String.self, from: Data(json.utf8)) else { throw TaskPageError("Invalid completed-status marker.") }
                 completedStatus = value; continue
+            }
+            if !titleSeen && line.hasPrefix("<!-- folio:completed-also ") && line.trimmingCharacters(in: .whitespaces).hasSuffix(" -->") {
+                let json = String(line.trimmingCharacters(in: .whitespaces).dropFirst(26).dropLast(4))
+                guard completedAlso == nil, let values = try? JSONDecoder().decode([String].self, from: Data(json.utf8)), !values.isEmpty else { throw TaskPageError("Invalid additional completed statuses.") }
+                completedAlso = values; continue
             }
             if !titleSeen && line.hasPrefix("# ") { title = String(line.dropFirst(2)); titleSeen = true; continue }
             if titleSeen && line.hasPrefix("## ") {
@@ -353,7 +366,7 @@ struct TaskDocument: Codable {
             if let id = ref.details.id, !ids.insert(id).inserted { throw TaskPageError("Duplicate task identity.") }
             if ref.kind != "goal", let status = ref.details.status, !statuses.contains(status) { statuses.append(status) }
         }
-        try TaskPreferences(statuses: statuses, completed: completedStatus).validate()
+        try preferences.validate()
         for index in tasks.indices {
             if let status = tasks[index].details.status {
                 tasks[index].status = status
@@ -361,19 +374,20 @@ struct TaskDocument: Codable {
             }
         }
     }
-    func status(of child: TaskCheckItem) -> String { child.details.status ?? (child.completed ? completedStatus : (statuses.first(where: { $0 != completedStatus }) ?? completedStatus)) }
+    func status(of child: TaskCheckItem) -> String { child.details.status ?? (child.completed ? completedStatus : (statuses.first(where: { !isCompleted($0) }) ?? completedStatus)) }
     static func line(_ value: String) -> String { value.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ") }
     var markdown: String {
         func check(_ title: String, _ completed: Bool) -> String { "- [\(completed ? "x" : " ")] " + Self.line(title) }
         func childRow(_ item: TaskCheckItem, _ depth: Int) -> String {
-            String(repeating: "  ", count: depth) + check(item.title, self.status(of: item) == completedStatus) + item.details.markdown(child: true, depth: depth) + item.subtasks.map { "\n" + childRow($0, depth + 1) }.joined()
+            String(repeating: "  ", count: depth) + check(item.title, isCompleted(self.status(of: item))) + item.details.markdown(child: true, depth: depth) + item.subtasks.map { "\n" + childRow($0, depth + 1) }.joined()
         }
         var result = Self.marker + "\n"
         if completedStatus != "Done" { result += "<!-- folio:completed " + String(decoding: try! JSONEncoder().encode(completedStatus), as: UTF8.self) + " -->\n" }
+        if let values = completedAlso, !values.isEmpty { result += "<!-- folio:completed-also " + String(decoding: try! JSONEncoder().encode(values), as: UTF8.self) + " -->\n" }
         result += "# " + Self.line(title) + "\n\n## Goals\n\n" + goals.map { check($0.title, goalProgress($0).done) + $0.details.markdown(child: false) }.joined(separator: "\n")
         for status in statuses {
             result += "\n\n## " + status + "\n\n" + tasks.filter { $0.status == status }.map { task in
-                ([check(task.title, status == completedStatus) + task.details.markdown(child: false)] + task.subtasks.map { childRow($0, 1) }).joined(separator: "\n")
+                ([check(task.title, isCompleted(status)) + task.details.markdown(child: false)] + task.subtasks.map { childRow($0, 1) }).joined(separator: "\n")
             }.joined(separator: "\n")
         }
         return result.trimmingCharacters(in: .newlines) + "\n"
@@ -384,17 +398,17 @@ struct TaskDocument: Codable {
         for i in changed.indices {
             let old = changed[i].status
             changed[i].status = renames[old] ?? old
-            if old == completedStatus { changed[i].status = preferences.completed }
+            if old == completedStatus && (!preferences.statuses.contains(changed[i].status) || (preferences.completed != completedStatus && !preferences.isCompleted(changed[i].status))) { changed[i].status = preferences.completed }
             guard preferences.statuses.contains(changed[i].status) else { throw TaskPageError("Move tasks out of ‘\(old)’ before removing that status.") }
             func configureChild(_ item: inout TaskCheckItem) throws {
-                let old = status(of: item), next = old == completedStatus ? preferences.completed : renames[old] ?? old
+                let old = status(of: item), next = old == completedStatus && (!preferences.statuses.contains(renames[old] ?? old) || (preferences.completed != completedStatus && !preferences.isCompleted(renames[old] ?? old))) ? preferences.completed : renames[old] ?? old
                 guard preferences.statuses.contains(next) else { throw TaskPageError("Move subtasks out of ‘\(old)’ before removing that status.") }
-                item.details.status = next; item.completed = next == preferences.completed
+                item.details.status = next; item.completed = preferences.isCompleted(next)
                 for j in item.subtasks.indices { try configureChild(&item.subtasks[j]) }
             }
             for j in changed[i].subtasks.indices { try configureChild(&changed[i].subtasks[j]) }
         }
-        statuses = preferences.statuses; completedStatus = preferences.completed; tasks = changed
+        statuses = preferences.statuses; completedStatus = preferences.completed; completedAlso = preferences.completedAlso; tasks = changed
     }
 }
 
@@ -425,7 +439,7 @@ extension TaskDocument {
     }
     func goalProgress(_ goal: TaskCheckItem) -> (linked: [TaskReference], completed: Int, done: Bool) {
         let linked = references.filter { $0.kind != "goal" && goal.details.id != nil && ($0.details.goals ?? []).contains(goal.details.id ?? "") }
-        let completed = linked.filter { $0.status == completedStatus }.count
+        let completed = linked.filter { isCompleted($0.status) }.count
         return (linked, completed, linked.isEmpty ? goal.completed : completed == linked.count)
     }
     mutating func setTaskGoals(_ reference: String, goals goalReferences: [String]) throws {
@@ -470,7 +484,7 @@ extension TaskDocument {
         if let destination, destination.details.draft == true || destination.reference.hasPrefix(source.reference + ".") { throw TaskPageError("A task cannot be moved under one of its own subtasks or a draft.") }
         let path = source.reference.dropFirst(2).split(separator: ".").map { Int($0)! }
         var item: TaskCheckItem
-        if path.count == 1 { let main = tasks[path[0]]; var details = main.details; details.status = main.status; item = TaskCheckItem(title: main.title, completed: main.status == completedStatus, details: details, subtasks: main.subtasks) }
+        if path.count == 1 { let main = tasks[path[0]]; var details = main.details; details.status = main.status; item = TaskCheckItem(title: main.title, completed: isCompleted(main.status), details: details, subtasks: main.subtasks) }
         else {
             var found: TaskCheckItem?
             tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { found = $0 }

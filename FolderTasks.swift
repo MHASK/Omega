@@ -52,8 +52,8 @@ struct FolderTaskSnapshot {
             goalIDs[source.key] = Set(source.document.goals.enumerated().map { $0.element.details.id ?? Self.legacyID(source.key, "g:\($0.offset)") })
         }
         func status(_ name: String, in source: FolderTaskSource) -> String {
-            if name == source.document.completedStatus { return aggregate.completedStatus }
-            let name = name.caseInsensitiveCompare(aggregate.completedStatus) == .orderedSame ? String(name.prefix(32)) + " (open)" : name
+            if source.document.isCompleted(name) { return aggregate.completedStatus }
+            let name = aggregate.completedStatuses.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) ? String(name.prefix(32)) + " (open)" : name
             if let existing = aggregate.statuses.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { return existing }
             aggregate.statuses.insert(name, at: max(0, aggregate.statuses.count - 1)); return name
         }
@@ -91,7 +91,7 @@ struct FolderTaskSnapshot {
             func child(_ item: TaskCheckItem, ref: String) -> TaskCheckItem {
                 var result = item; result.details = details(item.details, ref: ref, source: source)
                 result.details.status = status(source.document.status(of: item), in: source)
-                result.completed = result.details.status == aggregate.completedStatus
+                result.completed = aggregate.isCompleted(result.details.status)
                 result.subtasks = item.subtasks.enumerated().map { child($0.element, ref: ref + ".\($0.offset)") }; return result
             }
             aggregate.goals += source.document.goals.enumerated().map { index, g in
@@ -103,7 +103,7 @@ struct FolderTaskSnapshot {
                 task.subtasks = task.subtasks.enumerated().map { child($0.element, ref: "t:\(index).\($0.offset)") }; return task
             }
         }
-        try TaskPreferences(statuses: aggregate.statuses, completed: aggregate.completedStatus).validate()
+        try aggregate.preferences.validate()
         document = aggregate
     }
     static func legacyID(_ source: String, _ ref: String) -> String { "omega-" + hash(source + ":" + ref).prefix(32) }
@@ -112,7 +112,7 @@ struct FolderTaskSnapshot {
     /// Validate the complete proposal before any file is written. Callers also
     /// compare every changed file's exact revision immediately before saving.
     func edits(_ proposal: TaskDocument) throws -> [Edit] {
-        guard proposal.title == document.title, proposal.statuses == document.statuses, proposal.completedStatus == document.completedStatus else { throw TaskPageError("Folder settings changed. Refresh the task view before editing.") }
+        guard proposal.title == document.title, proposal.statuses == document.statuses, proposal.completedStatuses == document.completedStatuses else { throw TaskPageError("Folder settings changed. Refresh the task view before editing.") }
         let sourceKeys = Set(sources.map(\.key))
         let all = proposal.references
         for ref in all {
@@ -152,9 +152,12 @@ struct FolderTaskSnapshot {
             }
             guard needsGoalIdentity || needsTaskIdentity || !Self.equal(desired, previous) else { continue }
             var output = source.document
-            func localStatus(_ name: String) -> String {
-                if name == proposal.completedStatus { return output.completedStatus }
-                if name == String(proposal.completedStatus.prefix(32)) + " (open)", output.statuses.contains(proposal.completedStatus), output.completedStatus != proposal.completedStatus { return proposal.completedStatus }
+            func localStatus(_ name: String, id: String? = nil) -> String {
+                if proposal.isCompleted(name) {
+                    if let id, let old = source.document.references.first(where: { ($0.details.id ?? Self.legacyID(source.key, $0.reference)) == id }), source.document.isCompleted(old.status), let status = old.status { return status }
+                    return output.completedStatus
+                }
+                if let original = output.statuses.first(where: { original in name == String(original.prefix(32)) + " (open)" && !output.isCompleted(original) && proposal.completedStatuses.contains(where: { $0.caseInsensitiveCompare(original) == .orderedSame }) }) { return original }
                 if let match = output.statuses.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { return match }
                 if !output.statuses.contains(name) { output.statuses.insert(name, at: max(0, output.statuses.count - 1)) }
                 return name
@@ -188,16 +191,16 @@ struct FolderTaskSnapshot {
             }
             func child(_ input: TaskCheckItem) throws -> TaskCheckItem {
                 var c = input; c.details = try localDetails(c.details)
-                c.details.status = localStatus(proposal.status(of: input)); c.completed = c.details.status == output.completedStatus
+                c.details.status = localStatus(proposal.status(of: input), id: c.details.id); c.completed = output.isCompleted(c.details.status)
                 c.subtasks = try c.subtasks.map(child); return c
             }
             output.goals = try desired.goals.map { g in var g = g; g.details = try localDetails(g.details); return g }
             output.tasks = try desired.tasks.map { task in
-                var task = task; task.status = localStatus(task.status); task.details = try localDetails(task.details)
+                var task = task; task.details = try localDetails(task.details); task.status = localStatus(task.status, id: task.details.id)
                 task.subtasks = try task.subtasks.map(child); return task
             }
             // Legacy IDs are only persisted when a page actually changes.
-            try TaskPreferences(statuses: output.statuses, completed: output.completedStatus).validate()
+            try output.preferences.validate()
             let requiredIDs = Set(desired.references.filter { referencedTasks.contains($0.details.id ?? "") }.compactMap { Self.string($0.details.extra["_folderID"]) })
             let text = try source.inline.map { try $0.render(output, persisting: requiredIDs) } ?? output.markdown
             if text != source.text { result.append(Edit(url: source.url, before: source.text, after: text)) }
@@ -238,8 +241,8 @@ struct InlineTaskDocument {
             if let id = row.details.id, !seen.insert(id).inserted { throw TaskPageError("Two inline tasks share an ID. Open their source page to repair it.") }
             let done = row.item.completed
             // Editing a checkbox in a note always wins over an old status field.
-            let configured = row.details.status ?? (done ? document.completedStatus : document.statuses.first { $0 != document.completedStatus } ?? document.completedStatus)
-            let status = done ? document.completedStatus : configured == document.completedStatus ? document.statuses.first { $0 != document.completedStatus } ?? configured : configured
+            let configured = row.details.status ?? (done ? document.completedStatus : document.statuses.first { !document.isCompleted($0) } ?? document.completedStatus)
+            let status = done ? (document.isCompleted(configured) ? configured : document.completedStatus) : document.isCompleted(configured) ? document.statuses.first { !document.isCompleted($0) } ?? configured : configured
             if !document.statuses.contains(status) { document.statuses.append(status) }
             var details = row.details; details.status = status
             let child = TaskCheckItem(title: row.title, completed: done, details: details)
@@ -279,8 +282,8 @@ struct InlineTaskDocument {
             ordered.append((id, text, depth))
         }
         for goal in proposed.goals { try line(goal.title, proposed.goalProgress(goal).done, goal.details, 0, goal: true) }
-        func child(_ c: TaskCheckItem, _ depth: Int) throws { try line(c.title, proposed.status(of: c) == proposed.completedStatus, c.details, depth); for next in c.subtasks { try child(next, depth + 1) } }
-        for task in proposed.tasks { var d = task.details; d.status = task.status; try line(task.title, task.status == proposed.completedStatus, d, 0); for c in task.subtasks { try child(c, 1) } }
+        func child(_ c: TaskCheckItem, _ depth: Int) throws { try line(c.title, proposed.isCompleted(proposed.status(of: c)), c.details, depth); for next in c.subtasks { try child(next, depth + 1) } }
+        for task in proposed.tasks { var d = task.details; d.status = task.status; try line(task.title, proposed.isCompleted(task.status), d, 0); for c in task.subtasks { try child(c, 1) } }
         // Row IDs are installed in a copy before rendering; text ranges stay exact.
         let keys = rows.map { $0.details.id ?? "" }
         guard !keys.contains("") else { throw TaskPageError("Inline task identities were not prepared.") }

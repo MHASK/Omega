@@ -1,3 +1,4 @@
+import {isCompleted} from './task-model.js';
 import {subtaskStatus,walkTasks} from './task-model.js';
 
 // Each saved task and subtask contributes once, regardless of which groups are
@@ -5,7 +6,7 @@ import {subtaskStatus,walkTasks} from './task-model.js';
 export function projectCompletion(model){
  const entries=walkTasks(model).filter(({item,ancestors})=>!item.details?.draft&&!ancestors.some(a=>a.details?.draft));
  const total=entries.length,done=model.statuses.indexOf(model.completed);
- const completed=entries.filter(({item,parent})=>(parent?subtaskStatus(model,item):item.status)===done).length;
+ const completed=entries.filter(({item,parent})=>isCompleted(model,parent?subtaskStatus(model,item):item.status)).length;
  const percent=total?Math.round(completed/total*100):0;
  return {completed,total,label:total?`${percent}% complete · ${completed} of ${total} tasks and subtasks complete`:'No tasks yet'};
 }
@@ -15,7 +16,7 @@ export function projectCompletion(model){
 export function taskCompletion(model,item,parent=null){
  const children=item.children||[],done=model.statuses.indexOf(model.completed);
  const total=children.length||1;
- const completed=children.length?children.filter(child=>subtaskStatus(model,child)===done).length:Number((parent?subtaskStatus(model,item):item.status)===done);
+ const completed=children.length?children.filter(child=>isCompleted(model,subtaskStatus(model,child))).length:Number(isCompleted(model,parent?subtaskStatus(model,item):item.status));
  return {completed,total,label:children.length?`${completed} of ${total} subtasks complete`:(completed?'Completed':'Not completed')};
 }
 

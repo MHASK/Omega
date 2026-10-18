@@ -28,6 +28,7 @@ struct AgentWorkflowSettings: View {
             }
             Text("Project setup adds a managed section to AGENTS.md and CLAUDE.md, preserving and backing up existing instructions. Reconnect your assistant after an Omega update to discover new tools.")
                 .font(.system(size: 10 * scale)).foregroundStyle(Color(nsColor: Ink.muted)).fixedSize(horizontal: false, vertical: true)
+            Button("Install omega terminal command") { perform { let file = try AgentCLI.install(); message = "Installed " + file.path + ". Add ~/.local/bin to your shell PATH, then use omega ready." } }
             if !message.isEmpty { Text(message).font(.system(size: 11 * scale)).foregroundStyle(error ? Color.red : Color(nsColor: Ink.muted)).textSelection(.enabled) }
         } footer: {
             HStack {

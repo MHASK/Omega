@@ -19,7 +19,7 @@ export function updateTasks(doc,next,previous){
  const meta=doc.getMap('meta'),items=doc.getMap('items'),before=previous?flatten(previous):new Map(),after=flatten(next);
  doc.transact(()=>{
   if(!previous||next.title!==previous.title)changeText(doc.getText('title'),next.title);
-  for(const key of ['statuses','completed'])if(!previous||!equal(next[key],previous[key]))meta.set(key,next[key]);
+  for(const key of ['statuses','completed','completedAlso'])if(!previous||!equal(next[key],previous[key]))meta.set(key,next[key]??null);
   for(const [id,data] of after){
    let item=items.get(id);if(!item){item=new Y.Map();items.set(id,item);}const prior=before.get(id);
    if(!prior)item.set('deleted',false);
@@ -38,7 +38,7 @@ export function readTasks(doc){
  const meta=doc.getMap('meta'),entries=[...doc.getMap('items')].filter(([,item])=>!item.get('deleted')).sort(([a,x],[b,y])=>(x.get('order')||0)-(y.get('order')||0)||a.localeCompare(b));
  const statuses=[...(meta.get('statuses')||['To do','In progress','Done'])],completed=meta.get('completed')||'Done';
  for(const [,v] of entries){const s=v.get('status');if(s&&!statuses.includes(s))statuses.push(s);}if(!statuses.includes(completed))statuses.push(completed);
- const model={title:doc.getText('title').toString(),statuses,completed,goals:[],tasks:[]},byID=new Map();
+ const model={title:doc.getText('title').toString(),statuses,completed,...(meta.get('completedAlso')?{completedAlso:meta.get('completedAlso')}:{}),goals:[],tasks:[]},byID=new Map();
  for(const [id,v] of entries){
   const details={...Object.fromEntries([...(v.get('extra')?.entries()||[])].filter(([key])=>!detailKeys.has(key))),id},description=v.get('description')?.toString()||'';if(description)details.description=description;
   for(const key of ['labels','goals']){const values=[...(v.get(key)?.keys()||[])].sort();if(values.length)details[key]=values.slice(0,key==='labels'?12:32);}

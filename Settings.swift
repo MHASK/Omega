@@ -33,6 +33,7 @@ struct FolioSettingsView: View {
     @State private var scope = "defaults"
     @State private var rows: [StatusDraft] = []
     @State private var completedID: UUID?
+    @State private var completedAlsoIDs: Set<UUID> = []
     @State private var pageURL: URL?
     @State private var pagePreferences: TaskPreferences?
     @State private var baseline = TaskPreferences()
@@ -45,7 +46,8 @@ struct FolioSettingsView: View {
     var scale: CGFloat { CGFloat(notebook.zoom) }
     private var muted: Color { Color(nsColor: Ink.muted) }
     private var accent: Color { Color(nsColor: NotebookTint.lavender.color) }
-    private var changes: Bool { rows.map(\.name) != baseline.statuses || rows.first(where: { $0.id == completedID })?.name != baseline.completed }
+    private var additionalCompleted: [String] { rows.filter { completedAlsoIDs.contains($0.id) && $0.id != completedID }.map(\.name) }
+    private var changes: Bool { additionalCompleted != (baseline.completedAlso ?? []) || rows.map(\.name) != baseline.statuses || rows.first(where: { $0.id == completedID })?.name != baseline.completed }
 
     var body: some View {
         GeometryReader { geometry in
@@ -99,7 +101,7 @@ struct FolioSettingsView: View {
         .onAppear {
             if let target = notebook.settingsDestination, let requested = SettingsSection(rawValue: target) { section = requested; notebook.settingsDestination = nil }
             if let url = notebook.selected, let page = try? TaskDocument(markdown: notebook.text) {
-                pageURL = url; pagePreferences = TaskPreferences(statuses: page.statuses, completed: page.completedStatus)
+                pageURL = url; pagePreferences = page.preferences
                 scope = "page"
             }
             loadRows()
@@ -222,9 +224,12 @@ struct FolioSettingsView: View {
                         TextField("Status name", text: $row.name).textFieldStyle(.plain).padding(7 * scale)
                             .background(Color(nsColor: Ink.paper), in: RoundedRectangle(cornerRadius: 4 * scale))
                             .overlay(RoundedRectangle(cornerRadius: 4 * scale).stroke(Color(nsColor: Ink.separator), lineWidth: 1))
-                        Button { completedID = row.id } label: {
-                            Image(systemName: completedID == row.id ? "checkmark.circle.fill" : "circle").foregroundStyle(completedID == row.id ? accent : muted).frame(width: 30 * scale)
-                        }.buttonStyle(.plain).accessibilityLabel("Mark \(row.name) as completed status")
+                        Button {
+                            if row.id == completedID { return }
+                            if !completedAlsoIDs.insert(row.id).inserted { completedAlsoIDs.remove(row.id) }
+                        } label: {
+                            Image(systemName: (completedID == row.id || completedAlsoIDs.contains(row.id)) ? "checkmark.circle.fill" : "circle").foregroundStyle((completedID == row.id || completedAlsoIDs.contains(row.id)) ? accent : muted).frame(width: 30 * scale)
+                        }.buttonStyle(.plain).accessibilityLabel("Count \(row.name) as complete").help("More than one status can count as complete")
                         Button { rows.removeAll { $0.id == row.id }; if completedID == row.id { completedID = rows.last?.id } } label: {
                             Image(systemName: "minus").foregroundStyle(muted).frame(width: 18 * scale)
                         }.buttonStyle(.plain).disabled(rows.count == 1).accessibilityLabel("Remove \(row.name) status")
@@ -232,6 +237,10 @@ struct FolioSettingsView: View {
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 10 * scale) {
+                    Picker("Default completion", selection: $completedID) {
+                        ForEach(rows.filter { $0.id == completedID || completedAlsoIDs.contains($0.id) }) { row in Text(row.name).tag(Optional(row.id)) }
+                    }.onChange(of: completedID) { old, new in if let old, rows.contains(where: { $0.id == old }) { completedAlsoIDs.insert(old) }; if let new { completedAlsoIDs.remove(new) } }
+                    Text("Checked statuses count toward progress and unblock dependent tasks.").foregroundStyle(muted)
                     HStack { addStatus; Spacer(); saveStatuses }
                     Text(message.isEmpty ? "Renaming keeps tasks in place. Move tasks before removing their status." : message)
                         .foregroundStyle(hasError ? Color.red : muted).fixedSize(horizontal: false, vertical: true)
@@ -304,10 +313,11 @@ struct FolioSettingsView: View {
         baseline = scope == "page" ? (pagePreferences ?? notebook.taskPreferences) : notebook.taskPreferences
         rows = baseline.statuses.map { StatusDraft(original: $0, name: $0) }
         completedID = rows.first(where: { $0.name == baseline.completed })?.id
+        completedAlsoIDs = Set(rows.filter { (baseline.completedAlso ?? []).contains($0.name) }.map(\.id))
         message = ""; hasError = false
     }
     private func save() {
-        let value = TaskPreferences(statuses: rows.map(\.name), completed: rows.first(where: { $0.id == completedID })?.name ?? "")
+        let value = TaskPreferences(statuses: rows.map(\.name), completed: rows.first(where: { $0.id == completedID })?.name ?? "", completedAlso: additionalCompleted.isEmpty ? nil : additionalCompleted)
         do { try value.validate() } catch { message = error.localizedDescription; hasError = true; return }
         let renames = Dictionary(uniqueKeysWithValues: rows.compactMap { row in row.original.map { ($0, row.name) } })
         saving = true

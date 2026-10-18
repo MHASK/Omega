@@ -17,7 +17,7 @@ enum NoteChecklist {
         if TaskDocument.isTaskPage(source) {
             guard let doc = try? TaskDocument(markdown: source) else { return [] }
             return doc.references.filter { $0.kind != "goal" && $0.details.draft != true }.map {
-                NoteChecklistItem(title: $0.title, completed: $0.status == doc.completedStatus,
+                NoteChecklistItem(title: $0.title, completed: doc.isCompleted($0.status),
                                   depth: $0.reference.filter { $0 == "." }.count, offset: 0, reference: $0.reference)
             }
         }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
+import {projectCompletion,taskCompletion} from './completion-ring.js';
 import {TaskPage} from './task-page.js';
 import {parseTasks,serializeTasks,validDetails} from './task-model.js';
 import {workGraph,workState,setDependencies} from './task-coordination.js';
@@ -62,5 +63,11 @@ export function runCoordinationTests(){
  const wide={...model,tasks:Array.from({length:3000},(_,i)=>task('n'+i,{omegaDependencies:[...new Set([i-1,i-2].filter(n=>n>=0))].map(n=>({id:'n'+n}))},2))};
  wide.tasks.at(-1).status=0;graph=workGraph(wide);assert.equal(graph(wide.tasks.at(-1)).state,'ready');
  wide.tasks[0].details.omegaDependencies=[{id:'n2999'}];assert.equal(workState(wide,wide.tasks.at(-1)).cyclic,true);
+ const multi={...model,statuses:['To do','In progress','Merged','Done'],completed:'Done',completedAlso:['Merged'],tasks:[task('merged',{},2),task('waiting',{omegaDependencies:[{id:'merged'}]}),task('human',{labels:['YOU']}),task('expired',{omegaClaim:{owner:'A',token:'old',at:'2026-10-18',expires:1},omegaAssignee:'A'},1)]};
+ const parsed=parseTasks(serializeTasks(multi));assert(parsed);assert.deepEqual(parsed.completedAlso,['Merged']);assert.equal(workState(parsed,parsed.tasks.find(t=>t.id==='merged')).state,'done');assert.equal(workState(parsed,parsed.tasks.find(t=>t.id==='waiting')).state,'ready');assert.equal(workState(parsed,parsed.tasks.find(t=>t.id==='human')).state,'human');assert.equal(workState(parsed,parsed.tasks.find(t=>t.id==='expired')).state,'recoverable');assert.equal(projectCompletion(parsed).completed,1);assert.equal(taskCompletion(parsed,parsed.tasks.find(t=>t.id==='merged')).completed,1);
+ const host=document.createElement('div');document.body.append(host);const ui=new TaskPage(host,()=>{});ui.load(serializeTasks(multi));ui.setView('ready');assert.equal(host.querySelectorAll('.task-list-row').length,1);host.querySelector('[aria-label="For people"]').click();assert(host.querySelector('[data-task=human]'));host.querySelector('[aria-label="Recoverable"]').click();assert(host.querySelector('[data-task=expired]'));ui.openDetail(ui.lookup('human').item);const audience=host.querySelector('[aria-label="Work for"]');audience.value='agent';audience.dispatchEvent(new window.Event('change',{bubbles:true}));assert.equal(parseTasks(ui.raw).tasks.find(t=>t.id==='human').details.omegaAudience,'agent');host.remove();ui.descriptions.forEach(e=>e.destroy());
+ const live=seedModel(serializeTasks(multi),'tasks');assert.deepEqual(parseTasks(taskText(live)).completedAlso,['Merged']);live.destroy();
+ for(const bad of [{omegaAudience:'robot'},{omegaClaim:{owner:'A',token:'x',at:'now',expires:-1}},{omegaClaim:{owner:'A',token:'x',at:'now',expires:'yesterday'}}])assert.equal(validDetails(bad),false);
+ console.log('PASS: multiple complete statuses, progress, human/agent/recovery queues, audience editor, lease validation and live checkpoint persistence.');
  console.log('PASS: Ready queue states, cyclic/missing prerequisites, subtask status, setup UI, read-only ownership, Markdown persistence, concurrent handoffs and large dependency graphs.');
 }

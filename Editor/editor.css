@@ -378,3 +378,5 @@ body.has-import-issue{display:flex;flex-direction:column}
 :root:not([data-theme=dark]) .task-work-badge{color:#52688e;background:#52688e12}:root:not([data-theme=dark]) .task-work-badge.blocked{color:#81612b;background:#81612b12}:root:not([data-theme=dark]) .task-work-badge.review{color:#765995;background:#76599512}
 
 .task-priority{font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:2px 5px;white-space:nowrap}
+
+.task-ready-filters{display:flex;gap:4px;padding:0 0 14px}.task-ready-filters button{border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:5px;font:inherit;cursor:pointer}.task-ready-filters button.active{background:var(--hover);color:var(--text)}

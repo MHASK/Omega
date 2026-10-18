@@ -19,6 +19,8 @@ struct FolioMain {
             } catch { fputs("Couldn’t start isolated tests: \(error)\n", stderr); exit(1) }
         }
         if let i = CommandLine.arguments.firstIndex(of: "--finish-update"), CommandLine.arguments.count > i + 1 { exit(FolioUpdates.finish(planURL: URL(fileURLWithPath: CommandLine.arguments[i + 1]))) }
+        if CommandLine.arguments.contains("--install-cli") { do { print(try AgentCLI.install().path); exit(0) } catch { print(error.localizedDescription); exit(1) } }
+        if let i = CommandLine.arguments.firstIndex(of: "--agent") { exit(AgentCLI.run(Array(CommandLine.arguments.dropFirst(i + 1)))) }
         if let i = CommandLine.arguments.firstIndex(of: "--agent-call"), CommandLine.arguments.count > i + 1 { exit(FolioMCP.callFromCLI(CommandLine.arguments[i + 1])) }
         if CommandLine.arguments.contains("--agent-setup") { exit(AgentSetup.runCLI()) }
         if CommandLine.arguments.contains("--mcp") { FolioMCP.run(); return }

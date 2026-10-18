@@ -363,9 +363,9 @@ enum FolioMCP {
         let document = try FolderTaskSource(url: url, text: String(contentsOf: url, encoding: .utf8), preferences: notebook.taskPreferences).document
         var result = try item(url)
         result["kind"] = "task_page"; result["title"] = document.title
-        result["statuses"] = document.statuses; result["completed_status"] = document.completedStatus
+        result["statuses"] = document.statuses; result["completed_status"] = document.completedStatus; result["completed_statuses"] = document.completedStatuses
         func childValue(_ child: TaskCheckItem, index: Int, reference: String) -> [String: Any] {
-            ["index": index, "reference": reference, "title": child.title, "completed": document.status(of: child) == document.completedStatus, "status": document.status(of: child), "id": child.details.id as Any? ?? NSNull(), "description": child.details.description ?? "", "due_date": child.details.due as Any? ?? NSNull(), "labels": child.details.labels ?? [], "priority": Self.priorityOf(child.details) as Any? ?? NSNull(), "draft": child.details.draft ?? false, "goal_ids": child.details.goals ?? [],
+            ["index": index, "reference": reference, "title": child.title, "completed": document.isCompleted(document.status(of: child)), "status": document.status(of: child), "id": child.details.id as Any? ?? NSNull(), "description": child.details.description ?? "", "due_date": child.details.due as Any? ?? NSNull(), "labels": child.details.labels ?? [], "priority": Self.priorityOf(child.details) as Any? ?? NSNull(), "draft": child.details.draft ?? false, "goal_ids": child.details.goals ?? [],
              "subtasks": child.subtasks.enumerated().map { childValue($0.element, index: $0.offset, reference: reference + ".\($0.offset)") }]
         }
         result["goals"] = document.goals.enumerated().map { index, goal -> [String: Any] in
@@ -379,7 +379,7 @@ enum FolioMCP {
             ["reference": ref.reference, "state": workGraph.state(ref), "fields": ref.details.extra.mapValues { value -> Any in (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: [.fragmentsAllowed])) ?? NSNull() }]
         }
         result["tasks"] = document.tasks.enumerated().map { index, task -> [String: Any] in
-            ["index": index, "reference": "t:\(index)", "title": task.title, "status": task.status, "completed": task.status == document.completedStatus,
+            ["index": index, "reference": "t:\(index)", "title": task.title, "status": task.status, "completed": document.isCompleted(task.status),
              "id": task.details.id as Any? ?? NSNull(), "description": task.details.description ?? "", "due_date": task.details.due as Any? ?? NSNull(), "labels": task.details.labels ?? [], "priority": Self.priorityOf(task.details) as Any? ?? NSNull(), "draft": task.details.draft ?? false, "goal_ids": task.details.goals ?? [],
              "subtasks": task.subtasks.enumerated().map { childValue($0.element, index: $0.offset, reference: "t:\(index).\($0.offset)") }]
         }
@@ -405,7 +405,7 @@ enum FolioMCP {
             guard value.count <= 10_000, !value.contains("\n"), !value.contains("\r") else { throw AssistantError("Titles must be a single line of at most 10,000 characters.") }; return value
         }
         func status() throws -> String {
-            let value = args["status"] as? String ?? document.statuses.first(where: { $0 != document.completedStatus }) ?? document.completedStatus
+            let value = args["status"] as? String ?? document.statuses.first(where: { !document.isCompleted($0) }) ?? document.completedStatus
             guard document.statuses.contains(value) else { throw AssistantError("Unknown status. Use a status from read_task_page.") }; return value
         }
         func details(_ existing: TaskDetails, child: Bool) throws -> TaskDetails {
@@ -415,6 +415,7 @@ enum FolioMCP {
             if let due = args["due_date"] as? String { value.due = due.isEmpty ? nil : due }
             if let labels = args["labels"] as? [String] { value.labels = labels.isEmpty ? nil : labels }
             try Self.applyPriority(args, to: &value)
+            if let audience = args["audience"] as? String { value.extra["omegaAudience"] = audience == "auto" ? nil : .string(audience) }
             try value.validate(child: child); return value
         }
         func referencePath(_ key: String) throws -> [Int] {
@@ -436,6 +437,7 @@ enum FolioMCP {
             }
             for selected in affected {
                 guard let claim = TaskCoordination.claim(selected.details) else { continue }
+                guard !TaskCoordination.expired(selected.details) else { throw AssistantError("This claim expired. Read the task and claim it again before editing; the old receipt cannot authorize writes.") }
                 guard args["claim_token"] as? String == TaskCoordination.string(claim["token"]) else { throw AssistantError("This task is claimed. Supply its receipt before changing it.") }
                 try requireClaimAuthority(url)
             }
@@ -452,12 +454,12 @@ enum FolioMCP {
         case "add_task":
             if args["parent_reference"] != nil {
                 let path = try referencePath("parent_reference")
-                var child = TaskCheckItem(title: try title(), details: try details(TaskDetails(), child: true)); child.details.status = try status(); child.completed = child.details.status == document.completedStatus
+                var child = TaskCheckItem(title: try title(), details: try details(TaskDetails(), child: true)); child.details.status = try status(); child.completed = document.isCompleted(child.details.status)
                 if path.count == 1 { document.tasks[path[0]].subtasks.append(child) }
                 else { document.tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { $0.subtasks.append(child) } }
             } else if args["parent_task"] != nil {
                 let parent = try index("parent_task", count: document.tasks.count)
-                var child = TaskCheckItem(title: try title(), details: try details(TaskDetails(), child: true)); child.details.status = try status(); child.completed = child.details.status == document.completedStatus
+                var child = TaskCheckItem(title: try title(), details: try details(TaskDetails(), child: true)); child.details.status = try status(); child.completed = document.isCompleted(child.details.status)
                 document.tasks[parent].subtasks.append(child)
             } else { document.tasks.append(TaskPageItem(title: try title(), status: try status(), details: try details(TaskDetails(), child: false))) }
         case "update_task", "remove_task":
@@ -471,7 +473,7 @@ enum FolioMCP {
                 } else {
                     let newTitle = args["title"] == nil ? nil : try title()
                     var newStatus: String? = args["status"] == nil ? nil : try status()
-                    if let completed = args["completed"] as? Bool { newStatus = completed ? document.completedStatus : (document.statuses.first { $0 != document.completedStatus } ?? document.completedStatus) }
+                    if let completed = args["completed"] as? Bool { newStatus = completed ? document.completedStatus : (document.statuses.first { !document.isCompleted($0) } ?? document.completedStatus) }
                     if path.count == 1 {
                         let updated = try details(document.tasks[path[0]].details, child: false)
                         document.tasks[path[0]].details = updated
@@ -482,7 +484,7 @@ enum FolioMCP {
                         document.tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { value = $0 }
                         value.details = try details(value.details, child: true)
                         if let newTitle { value.title = newTitle }
-                        if let newStatus { value.details.status = newStatus; value.completed = newStatus == document.completedStatus }
+                        if let newStatus { value.details.status = newStatus; value.completed = document.isCompleted(newStatus) }
                         document.tasks[path[0]].subtasks[path[1]].update(at: path.dropFirst(2)) { $0 = value }
                     }
                 }
@@ -495,8 +497,8 @@ enum FolioMCP {
                     var value = document.tasks[parent].subtasks[child]
                     value.details = try details(value.details, child: true)
                     if args["status"] != nil { value.details.status = try status() }
-                    if let completed = args["completed"] as? Bool { value.details.status = completed ? document.completedStatus : (document.statuses.first(where: { $0 != document.completedStatus }) ?? document.completedStatus) }
-                    value.completed = document.status(of: value) == document.completedStatus
+                    if let completed = args["completed"] as? Bool { value.details.status = completed ? document.completedStatus : (document.statuses.first(where: { !document.isCompleted($0) }) ?? document.completedStatus) }
+                    value.completed = document.isCompleted(document.status(of: value))
                     document.tasks[parent].subtasks[child] = value
                 }
             } else {
@@ -508,7 +510,7 @@ enum FolioMCP {
                     document.tasks[task].details = try details(document.tasks[task].details, child: false)
                     if args["status"] != nil { document.tasks[task].status = try status() }
                     if let completed = args["completed"] as? Bool {
-                        document.tasks[task].status = completed ? document.completedStatus : (document.statuses.first(where: { $0 != document.completedStatus }) ?? document.completedStatus)
+                        document.tasks[task].status = completed ? document.completedStatus : (document.statuses.first(where: { !document.isCompleted($0) }) ?? document.completedStatus)
                     }
                 }
             }
@@ -529,7 +531,7 @@ enum FolioMCP {
                 let from = try string(args, "rename_from"), to = try string(args, "rename_to")
                 guard document.statuses.contains(from) else { throw AssistantError("The status being renamed does not exist.") }; renames[from] = to
             }
-            try document.configure(TaskPreferences(statuses: args["statuses"] as! [String], completed: string(args, "completed_status")), renames: renames)
+            try document.configure(TaskPreferences(statuses: args["statuses"] as! [String], completed: string(args, "completed_status"), completedAlso: try additionalCompleted(args, document: document, renames: renames)), renames: renames)
         default: throw AssistantError("Unknown task action.")
         }
     }
@@ -542,7 +544,7 @@ enum FolioMCP {
         case "read_task": return try readTask(args)
         case "read_work_queue": return try workQueue(args)
         case "get_context":
-            return ["notebooks": notebook.roots.map { ["path": $0.path, "name": $0.lastPathComponent] }, "active_note": notebook.selected?.path as Any? ?? NSNull(), "local_only": true, "agent_api": ["version": 2, "features": ["dependencies", "ready_queue", "task_revisions", "compact_receipts", "batch_edits", "priority", "filtered_queries", "agent_cli"], "batch_limit": 100, "discovery": "Reconnect folio in your MCP client if read_task or edit_tasks is missing."], "task_defaults": ["statuses": notebook.taskPreferences.statuses, "completed_status": notebook.taskPreferences.completed]]
+            return ["notebooks": notebook.roots.map { ["path": $0.path, "name": $0.lastPathComponent] }, "active_note": notebook.selected?.path as Any? ?? NSNull(), "local_only": true, "agent_api": ["version": 3, "features": ["dependencies", "ready_queue", "task_revisions", "compact_receipts", "batch_edits", "priority", "filtered_queries", "agent_cli", "multiple_completed_statuses", "claim_leases", "audience"], "batch_limit": 100, "claim_lease_default_seconds":1800, "shell":"Install omega from Settings → Assistants; use omega ready or omega call TOOL with JSON on stdin.", "discovery": "Reconnect folio in your MCP client after updating to refresh tool schemas, including renew_task_claim."], "task_defaults": ["statuses": notebook.taskPreferences.statuses, "completed_status": notebook.taskPreferences.completed]]
         case "list_items":
             let root = try directory("path"), entries = try NoteFiles.scan(root)
             let items = args["recursive"] as? Bool == true ? NoteFiles.flatten(entries) : entries

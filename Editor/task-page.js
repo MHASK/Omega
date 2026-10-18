@@ -1,3 +1,4 @@
+import {isCompleted} from './task-model.js';
 import {workGraph,workBadge,priorityBadge,coordinationPanel} from './task-coordination.js';
 import {labelChip,applyLabelTone} from './task-labels.js';
 import {completionRing,projectCompletion,taskCompletion,taskCompletionRing} from './completion-ring.js';
@@ -10,11 +11,11 @@ const el=(tag,cls='',text)=>{const n=document.createElement(tag);n.className=cls
 function button(text,label,action,cls='',icon){const n=el('button',cls);n.type='button';n.title=label;n.setAttribute('aria-label',label);if(icon)n.append(taskIcon(icon));if(text)n.append(el('span','',text));n.onclick=action;return n;}
 const formControl=n=>{n.dataset.mutates='true';return n;};
 const doneStatus=model=>model.statuses.indexOf(model.completed);
-const firstOpen=model=>Math.max(0,model.statuses.findIndex(s=>s!==model.completed));
+const firstOpen=model=>Math.max(0,model.statuses.findIndex(s=>!isCompleted(model,s)));
 
 export class TaskPage {
  constructor(element,onChange,options={}){
-  this.options=options;this.description=null;this.descriptions=[];
+  this.readyFilter='ready';this.options=options;this.description=null;this.descriptions=[];
   this.element=element;this.onChange=onChange;this.view='list';this.collapsed=new Set();this.expandedList=new Set();this.collapsedGroups=new Set();this.readOnly=false;this.model=null;this.raw='';this.detail=null;this.goalView=null;this.composer=null;this.createAnother=false;this.removeConfirm=false;this.popovers=[];
   this.element.addEventListener('keydown',e=>this.keydown(e));
   if(typeof ResizeObserver!=='undefined'){this.observer=new ResizeObserver(()=>{if(this.width===element.clientWidth)return;this.width=element.clientWidth;this.resizeFields();});this.observer.observe(element);}
@@ -53,7 +54,7 @@ export class TaskPage {
  }
  check(checked,label,action){const input=formControl(el('input','task-check'));input.type='checkbox';input.checked=checked;input.setAttribute('aria-label',label);input.onchange=()=>{if(!this.readOnly)action(input.checked);};return input;}
  statusOf(item,parent){return parent?subtaskStatus(this.model,item):item.status;}
- move(item,status,parent=null){if(this.readOnly)return;this.touch(item);if(parent)item.details.status=this.model.statuses[status];else item.status=status;item.done=status===doneStatus(this.model);this.change(true);}
+ move(item,status,parent=null){if(this.readOnly)return;this.touch(item);if(parent)item.details.status=this.model.statuses[status];else item.status=status;item.done=isCompleted(this.model,status);this.change(true);}
  statusSelect(item,parent,onChange){const select=formControl(el('select','task-status-select'));select.setAttribute('aria-label',parent?'Subtask status':'Task status');this.model.statuses.forEach((name,i)=>{const option=el('option','',name);option.value=String(i);select.append(option);});select.value=String(this.statusOf(item,parent));select.onchange=()=>onChange?onChange(Number(select.value)):this.move(item,Number(select.value),parent);return select;}
  setView(view){this.view=view;this.render();}
  openGoals(){this.detail=null;this.goalView='all';this.render();}
@@ -85,7 +86,7 @@ export class TaskPage {
   if(this.view==='list'){this.renderList(root);return;}
   const groups=el('div','task-groups '+this.view);groups.style.setProperty('--status-count',this.model.statuses.length);
   this.model.statuses.forEach((status,index)=>{
-   const group=el('section','task-group');group.dataset.status=String(index);if(status===this.model.completed)group.classList.add('status-complete');
+   const group=el('section','task-group');group.dataset.status=String(index);if(isCompleted(this.model,status))group.classList.add('status-complete');
    const entries=walkTasks(this.model),parents=entries.filter(e=>!e.parent&&e.item.status===index),children=entries.filter(e=>e.parent&&subtaskStatus(this.model,e.item)===index);
    const heading=el('div','task-group-heading');heading.append(el('span','task-status-dot'),el('span','task-status-name',status),el('span','task-count',String(parents.length+children.length)),formControl(button('','Add task to '+status,()=>this.addTask(index),'task-quiet-action','add')));group.append(heading);
    group.ondragover=e=>{if(this.readOnly||!e.dataTransfer.types.includes('application/x-folio-task'))return;e.preventDefault();e.dataTransfer.dropEffect='move';group.classList.add('drop-target');};
@@ -101,22 +102,24 @@ export class TaskPage {
     return family;
    };
    for(const task of this.model.tasks){const family=familyView(task);if(family)group.append(family);}
-   if(!parents.length&&!children.length)group.append(el('p','task-lane-empty',status===this.model.completed?'Completed tasks will appear here.':'No tasks here yet.'));
+   if(!parents.length&&!children.length)group.append(el('p','task-lane-empty',isCompleted(this.model,status)?'Completed tasks will appear here.':'No tasks here yet.'));
    group.append(formControl(button('Create task','Create task in '+status,()=>this.addTask(index),'task-create-row','add')));groups.append(group);
   });root.append(groups);
  }
  renderReady(root){
-  const group=el('section','task-group task-ready-group'),entries=walkTasks(this.model).filter(e=>this.workGraph(e.item).ready).sort((a,b)=>(a.item.details.omegaPriority??2)-(b.item.details.omegaPriority??2));
-  group.append(el('div','task-group-heading',`Ready to start · ${entries.length}`),el('p','task-ready-hint','Unassigned tasks in the first open status, with every dependency complete.'));
+  const group=el('section','task-group task-ready-group'),entries=walkTasks(this.model).filter(e=>this.workGraph(e.item).state===this.readyFilter).sort((a,b)=>(a.item.details.omegaPriority??2)-(b.item.details.omegaPriority??2));
+  const filters=el('div','task-ready-filters');filters.setAttribute('role','tablist');filters.setAttribute('aria-label','Work queue');
+  for(const [value,label] of [['ready','For agents'],['human','For people'],['recoverable','Recoverable']]){const b=button(label,label,()=>{this.readyFilter=value;this.render();},this.readyFilter===value?'active':'');b.setAttribute('role','tab');b.setAttribute('aria-selected',String(this.readyFilter===value));filters.append(b);}
+  group.append(filters,el('div','task-group-heading',`${this.readyFilter==='recoverable'?'Expired claims':this.readyFilter==='human'?'Human tasks':'Ready for agents'} · ${entries.length}`),el('p','task-ready-hint',this.readyFilter==='recoverable'?'Read the saved handoff and check existing work before reclaiming.':'Unassigned tasks with every dependency complete. YOU and HUMAN labels stay in the people queue.'));
   const rows=el('div','task-list-rows');for(const {item,parent} of entries)rows.append(this.listRow(item,parent,0));group.append(rows);
-  if(!entries.length)group.append(el('p','task-lane-empty','Nothing ready. Finish blockers or release assigned work to make it available.'));
+  if(!entries.length)group.append(el('p','task-lane-empty','No tasks in this queue.'));
   root.append(group);
  }
  // The list is its own compact hierarchy; board cards keep their independent layout.
  renderList(root){
   const groups=el('div','task-groups list');
   this.model.statuses.forEach((status,index)=>{
-   const tasks=this.model.tasks.filter(t=>t.status===index),group=el('section','task-group'+(status===this.model.completed?' status-complete':''));group.dataset.status=String(index);
+   const tasks=this.model.tasks.filter(t=>t.status===index),group=el('section','task-group'+(isCompleted(this.model,status)?' status-complete':''));group.dataset.status=String(index);
    const open=!this.collapsedGroups.has(status),heading=el('div','task-group-heading');
    const toggle=button('',(open?'Collapse ':'Expand ')+status,()=>{open?this.collapsedGroups.add(status):this.collapsedGroups.delete(status);this.renderListPreservingScroll();this.element.querySelector(`.list .task-group[data-status="${index}"] .task-group-toggle`)?.focus({preventScroll:true});},'task-group-toggle');toggle.setAttribute('aria-expanded',String(open));
    const chevron=taskIcon('chevron');chevron.classList.add('task-disclosure-icon');toggle.append(chevron,el('span','task-status-dot'),el('span','task-status-name',status),el('span','task-count',String(tasks.length)));heading.append(toggle,formControl(button('','Add task to '+status,()=>this.addTask(index),'task-quiet-action','add')));group.append(heading);
@@ -127,7 +130,7 @@ export class TaskPage {
     const rows=el('div','task-list-rows');
     const family=(item,parent=null,depth=0)=>{const wrap=el('div','task-list-family');wrap.append(this.listRow(item,parent,depth));if(item.children.length&&this.expandedList.has(item.id)){const children=el('div','task-list-children');for(const child of item.children)children.append(family(child,item,depth+1));wrap.append(children);}return wrap;};
     for(const task of tasks)rows.append(family(task));
-    if(!tasks.length)rows.append(el('p','task-lane-empty',status===this.model.completed?'Completed tasks will appear here.':'No tasks here yet.'));
+    if(!tasks.length)rows.append(el('p','task-lane-empty',isCompleted(this.model,status)?'Completed tasks will appear here.':'No tasks here yet.'));
     rows.append(formControl(button('Add task','Create task in '+status,()=>this.addTask(index),'task-create-row','add')));group.append(rows);
    }
    groups.append(group);
@@ -136,7 +139,7 @@ export class TaskPage {
  renderListPreservingScroll(focusID){const scroll=this.element.querySelector('.tasks-body')?.scrollTop||0;this.render();const body=this.element.querySelector('.tasks-body');if(body)body.scrollTop=scroll;if(focusID)[...this.element.querySelectorAll('.task-list-row')].find(row=>row.dataset.task===focusID)?.querySelector('.task-row-disclosure,.task-card-title')?.focus({preventScroll:true});}
  toggleList(item){this.expandedList.has(item.id)?this.expandedList.delete(item.id):this.expandedList.add(item.id);this.renderListPreservingScroll(item.id);}
  listRow(item,parent,depth){
-  const status=this.statusOf(item,parent),done=status===doneStatus(this.model),row=el('article','task-card task-list-row'+(parent?' subtask-card':'')+(done?' complete':'')+(item.details?.draft?' draft':''));row.dataset.task=item.id;row.style.setProperty('--task-depth',Math.min(depth,8));
+  const status=this.statusOf(item,parent),done=isCompleted(this.model,status),row=el('article','task-card task-list-row'+(parent?' subtask-card':'')+(done?' complete':'')+(item.details?.draft?' draft':''));row.dataset.task=item.id;row.style.setProperty('--task-depth',Math.min(depth,8));
   row.onclick=e=>{if(!e.target.closest('button,input,select'))this.openDetail(item);};
   row.draggable=!this.readOnly;row.ondragstart=e=>{if(this.readOnly){e.preventDefault();return;}e.dataTransfer.setData('application/x-folio-task',item.id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setDragImage(row,10,10);};
   const leading=el('div','task-row-leading');
@@ -151,7 +154,7 @@ export class TaskPage {
   return row;
  }
  card(item,parent=null){
-  const status=this.statusOf(item,parent),done=status===doneStatus(this.model),card=el('article','task-card'+(parent?' subtask-card':'')+(done?' complete':'')+(item.details?.draft?' draft':''));card.dataset.task=item.id;
+  const status=this.statusOf(item,parent),done=isCompleted(this.model,status),card=el('article','task-card'+(parent?' subtask-card':'')+(done?' complete':'')+(item.details?.draft?' draft':''));card.dataset.task=item.id;
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',`Open ${parent?'subtask':'task'}: ${item.title||'Untitled task'}`);card.onclick=e=>{if(!e.target.closest('button,input,select'))this.openDetail(item);};card.onkeydown=e=>{if(e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();this.openDetail(item);}};
   card.draggable=!this.readOnly;card.ondragstart=e=>{if(this.readOnly){e.preventDefault();return;}e.dataTransfer.setData('application/x-folio-task',item.id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setDragImage(card,10,10);};
   const title=button(item.title||'Untitled task',`Open ${parent?'subtask':'task'}: ${item.title||'Untitled task'}`,()=>this.openDetail(item),'task-card-title');card.append(title);const source=this.options.sourceBadge?.(item);if(source)card.append(source);
@@ -227,7 +230,7 @@ export class TaskPage {
   const description=el('div','task-description-section');description.append(el('div','task-section-label','Description'),this.descriptionField(item,()=>{this.touch(item);this.change(false,true);}),el('p','task-field-hint','Type / to link a task, goal, or page.'));detail.append(description);
   detail.append(coordinationPanel(this,item));
   {const section=el('section','task-detail-children');const head=el('div','task-section-heading'),label=el('span','task-section-label task-subtasks-label','Subtasks');if(item.children.length){const p=taskCompletion(this.model,item,parent);label.append(taskCompletionRing(this.model,item,parent),el('span','',`${p.completed}/${p.total}`));}head.append(label,formControl(button('Add subtask','Add subtask',()=>this.addChild(item),'','add')));section.append(head);
-   for(const child of item.children){const row=el('div','task-detail-child');row.append(this.check(subtaskStatus(this.model,child)===doneStatus(this.model),'Complete subtask',v=>this.move(child,v?doneStatus(this.model):firstOpen(this.model),item)),taskIcon('subtasks'),button(child.title||'Untitled subtask','Open subtask: '+(child.title||'Untitled subtask'),()=>this.openDetail(child),'task-child-title'),this.statusSelect(child,item));section.append(row);}
+   for(const child of item.children){const row=el('div','task-detail-child');row.append(this.check(isCompleted(this.model,subtaskStatus(this.model,child)),'Complete subtask',v=>this.move(child,v?doneStatus(this.model):firstOpen(this.model),item)),taskIcon('subtasks'),button(child.title||'Untitled subtask','Open subtask: '+(child.title||'Untitled subtask'),()=>this.openDetail(child),'task-child-title'),this.statusSelect(child,item));section.append(row);}
    if(!item.children.length){const empty=el('div','task-subtasks-empty');empty.append(taskIcon('subtasks'),el('p','','No subtasks yet'),el('span','','Break this task into a few smaller steps.'));section.append(empty);}detail.append(section);
   }
   if(this.removeConfirm){const overlay=el('div','task-overlay task-remove-overlay'),dialog=el('section','task-remove-dialog');dialog.setAttribute('role','alertdialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label',parent?'Remove subtask?':'Remove task?');const count=walkTasks({tasks:item.children||[]}).length;dialog.append(el('h2','',parent?'Remove subtask?':'Remove task?'),el('p','',count?`This also removes its ${count} subtask${count===1?'':'s'}.`:'This removes the task from this page.'),el('p','task-remove-hint','You can restore it with ⌘Z.'));const controls=el('div','task-remove-actions');const keep=button('Keep','Keep task',()=>{this.removeConfirm=false;this.render();this.element.querySelector('[aria-label="More task actions"]')?.focus();});controls.append(keep,formControl(button('Remove','Confirm remove task',()=>this.removeItem(item,parent),'task-primary')));dialog.append(controls);overlay.append(dialog);root.inert=true;this.element.append(overlay);queueMicrotask(()=>keep.focus());}

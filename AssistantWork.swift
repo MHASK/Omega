@@ -1,9 +1,9 @@
 import Foundation
 
 extension FolioMCP {
-    static let workMutationNames: Set<String> = ["set_task_dependencies", "configure_task_work", "claim_task", "release_task", "handoff_task", "ensure_task_identity"]
+    static let workMutationNames: Set<String> = ["set_task_dependencies", "configure_task_work", "claim_task", "release_task", "handoff_task", "ensure_task_identity", "renew_task_claim"]
     static let workFields: [String: Any] = [
-        "priority": priority,
+        "priority": priority, "audience": audience,
         "assignee": property("Person or agent responsible. Empty clears. Up to 200 characters."),
         "blocker": property("What is preventing progress. Empty clears."),
         "handoff": property("Persistent summary: decisions, completed work, tests, and next steps. Up to 12,000 characters."),
@@ -12,14 +12,16 @@ extension FolioMCP {
         "needs_review": property("Work is ready for human review, not yet completed.", type: "boolean"),
         "claim_token": property("Receipt returned by claim_task. Required to change claimed coordination fields or release a claim.")
     ]
+    static let lease: [String: Any] = ["type":"integer", "minimum":60, "maximum":86400, "description":"Claim lease in seconds (60–86400). Default 1800 (30 minutes). Renew before expiry."]
     static var workTools: [[String: Any]] {
         let target: [String: Any] = ["path": path, "expected_revision": version, "reference": reference]
         return [
-            tool("read_work_queue", "Read tasks and inline checklists under a notebook/folder, with dependency state, handoffs and source revisions. ready excludes blocked, claimed, assigned, draft, review and already-started work. Unavailable dependencies stay blocked. Inspect warnings before taking work.", ["path": path, "state": property("Optional ready, blocked, claimed, assigned, working, review, done or draft filter.")], required: ["path"]),
+            tool("read_work_queue", "Read tasks and inline checklists under a notebook/folder, with dependency state, handoffs and source revisions. ready excludes blocked, claimed, assigned, draft, review and already-started work. Unavailable dependencies stay blocked. Inspect warnings before taking work.", ["path": path, "state": property("Optional ready, blocked, claimed, recoverable, human, assigned, working, review, done or draft filter.")], required: ["path"]),
             tool("ensure_task_identity", "Give a task a durable ID before another page links it. Works on task pages and inline checklists. Re-read after a conflict.", target, required: ["path", "expected_revision", "reference"], readOnly: false),
             tool("set_task_dependencies", "Replace blocked-by dependencies; rejects cycles and unresolved targets. Each entry is a relative note path followed by # and a durable task ID, e.g. Plan.md#task-id. Use ensure_task_identity for legacy targets. Empty array clears.", target.merging(["dependencies": ["type": "array", "items": ["type": "string"], "maxItems": 32], "claim_token": workFields["claim_token"]!]) { _, n in n }, required: ["path", "expected_revision", "reference", "dependencies"], readOnly: false),
             tool("configure_task_work", "Set assignment, blocker, handoff and execution references. Omega never starts agents or changes worktrees. Existing claims require their receipt.", target.merging(workFields) { _, n in n }, required: ["path", "expected_revision", "reference"], readOnly: false),
-            tool("claim_task", "Exclusively claim a Ready task through this Mac's Omega service. Returns a claim receipt; keep it for handoff/release. Claims do not expire automatically. Git/live notebooks require a single designated Mac; configure it in Omega's agent setup first. Never assume a timed-out claim failed: read the task before retrying.", target.merging(["owner": property("Unique agent/session label, e.g. Claude / auth-fix. Up to 200 characters.")]) { _, n in n }, required: ["path", "expected_revision", "reference", "owner"], readOnly: false),
+            tool("renew_task_claim", "Extend an unexpired claim using its receipt and current task revision. Expired receipts cannot renew or edit; read the handoff and reclaim first.", target.merging(["claim_token":workFields["claim_token"]!,"lease_seconds":lease]) { _, n in n }, required:["path","expected_revision","reference","claim_token"], readOnly:false),
+            tool("claim_task", "Exclusively claim a Ready task through this Mac's Omega service. Returns a claim receipt; keep it for handoff/release. New claims expire after 30 minutes unless lease_seconds is specified. Expired work is recoverable, never automatically completed. Renew with renew_task_claim. Legacy claims remain manual. Git/live notebooks require a single designated Mac; configure it in Omega's agent setup first. Never assume a timed-out claim failed: read the task before retrying.", target.merging(["lease_seconds":lease, "owner": property("Unique agent/session label, e.g. Claude / auth-fix. Up to 200 characters.")]) { _, n in n }, required: ["path", "expected_revision", "reference", "owner"], readOnly: false),
             tool("release_task", "Release a claim using its receipt. Clears assignment; does not change task completion or erase the handoff. Read again before starting another task.", target.merging(["claim_token": workFields["claim_token"]!]) { _, n in n }, required: ["path", "expected_revision", "reference", "claim_token"], readOnly: false),
             tool("handoff_task", "Save a persistent handoff and release the claim. Defaults to needs_review=true; it never marks work completed. Set needs_review=false for unfinished work being handed to another agent.", target.merging(workFields) { _, n in n }, required: ["path", "expected_revision", "reference", "claim_token", "handoff"], readOnly: false)
         ]
@@ -54,10 +56,11 @@ extension FolioMCP {
     }
     func workQueue(_ args: [String: Any]) throws -> [String: Any] {
         let root = try resolve(args["path"] as! String, folder: true), (snapshot, warnings) = try workSnapshot(root)
-        let allowed = ["ready", "blocked", "claimed", "assigned", "working", "review", "done", "draft"]
+        let allowed = ["ready", "blocked", "claimed", "assigned", "working", "review", "done", "draft", "human", "recoverable"]
         if let state = args["state"] as? String, !allowed.contains(state) { throw AssistantError("Unknown work state.") }
         let revisions = Dictionary(uniqueKeysWithValues: snapshot.sources.map { ($0.key, AssistantWire.hash($0.text)) })
-        let queueRevision = AssistantWire.hash(revisions.map { $0.key + ":" + $0.value }.sorted().joined(separator: "\n") + String(decoding: AssistantWire.json(["statuses": snapshot.document.statuses, "completed": snapshot.document.completedStatus]), as: UTF8.self))
+        let expiryStates = snapshot.document.references.filter { TaskCoordination.expired($0.details) }.compactMap { $0.details.id }.sorted().joined(separator:",")
+        let queueRevision = AssistantWire.hash(expiryStates + revisions.map { $0.key + ":" + $0.value }.sorted().joined(separator: "\n") + String(decoding: AssistantWire.json(["statuses": snapshot.document.statuses, "completed": snapshot.document.completedStatuses]), as: UTF8.self))
         if let expected = args["expected_queue_revision"] as? String, expected != queueRevision { throw AssistantError("The queue changed while paging. Start at offset 0 again.") }
         let graph = TaskCoordination.Graph(snapshot.document)
         var rows: [[String: Any]] = []
@@ -68,6 +71,7 @@ extension FolioMCP {
             guard let key = FolderTaskSnapshot.string(ref.details.extra["_folderSource"]), let source = lookup[key],
                   let id = FolderTaskSnapshot.string(ref.details.extra["_folderID"]),
                   let original = source.document.references.first(where: { ($0.details.id ?? FolderTaskSnapshot.legacyID(source.key, $0.reference)) == id }) else { continue }
+            if let audience = args["audience"] as? String, TaskCoordination.audience(original.details) != audience { continue }
             if let label = args["label"] as? String, !(original.details.labels ?? []).contains(where: { $0.caseInsensitiveCompare(label) == .orderedSame }) { continue }
             if let status = args["status"] as? String, original.status != status { continue }
             if let priority = args["priority"] as? Int, Self.priorityOf(original.details) != priority { continue }
@@ -116,6 +120,7 @@ extension FolioMCP {
         guard let reference = args["reference"] as? String else { throw AssistantError("Supply a task reference with its page revision, or a durable task ID and task revision.") }
         guard let ref = document.references.first(where: { $0.reference == reference && $0.kind != "goal" }) else { throw AssistantError("Choose a task from a fresh work queue.") }
         if let claim = TaskCoordination.claim(ref.details), name != "claim_task", name != "ensure_task_identity" {
+            if TaskCoordination.expired(ref.details) && name != "release_task" && name != "handoff_task" { throw AssistantError("This claim expired. Read the task and claim it again before editing or renewing.") }
             guard let token = args["claim_token"] as? String, token == FolderTaskSnapshot.string(claim["token"]) else { throw AssistantError("This task is claimed. Supply its claim receipt or ask the owner to hand it off.") }
             try requireClaimAuthority(url)
         }
@@ -126,14 +131,18 @@ extension FolioMCP {
             let root = notebook.owner(of: url)!, (snapshot, warnings) = try workSnapshot(root)
             guard warnings.isEmpty else { throw AssistantError("Some source pages could not be read. Fix them before claiming work: " + warnings[0]) }
             let virtual = FolderTaskSnapshot.identity(source.key, ref.details.id ?? FolderTaskSnapshot.legacyID(source.key, reference))
-            guard let aggregate = snapshot.document.references.first(where: { $0.details.id == virtual }), TaskCoordination.state(aggregate, in: snapshot.document) == "ready" else { throw AssistantError("This task is not Ready. It may be blocked, assigned, claimed, in review, or complete. Refresh the work queue.") }
+            guard let aggregate = snapshot.document.references.first(where: { $0.details.id == virtual }), ["ready", "recoverable"].contains(TaskCoordination.state(aggregate, in: snapshot.document)), TaskCoordination.audience(ref.details) == "agent" else { throw AssistantError("This task is not Ready. It may be blocked, assigned, claimed, in review, or complete. Refresh the work queue.") }
             let owner = (args["owner"] as! String).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !owner.isEmpty && owner.utf16.count <= 200 else { throw AssistantError("Use a person or agent/session name of 1–200 characters.") }
             receipt = UUID().uuidString.lowercased()
             try document.updateDetails(reference) { d in
                 d.extra["omegaAssignee"] = .string(owner)
-                d.extra["omegaClaim"] = .object(["owner": .string(owner), "token": .string(receipt!), "at": .string(ISO8601DateFormatter().string(from: Date()))])
+                d.extra["omegaClaim"] = .object(["owner": .string(owner), "token": .string(receipt!), "at": .string(ISO8601DateFormatter().string(from: Date())), "expires": .number(Date().timeIntervalSince1970 + Double(args["lease_seconds"] as? Int ?? 1800))])
             }
+        } else if name == "renew_task_claim" {
+            guard var record = TaskCoordination.claim(ref.details), !TaskCoordination.expired(ref.details) else { throw AssistantError("There is no unexpired claim to renew.") }
+            record["expires"] = .number(Date().timeIntervalSince1970 + Double(args["lease_seconds"] as? Int ?? 1800))
+            try document.updateDetails(reference) { $0.extra["omegaClaim"] = .object(record) }
         } else if name == "set_task_dependencies" {
             var dependencies: [TaskJSON] = []
             for link in args["dependencies"] as! [String] {
@@ -157,6 +166,7 @@ extension FolioMCP {
             try document.updateDetails(reference) { d in
                 for (key, meta) in fields { if let value = args[key] as? String { d.extra[meta] = value.isEmpty ? nil : .string(value) } }
                 try Self.applyPriority(args, to: &d)
+                if let audience = args["audience"] as? String { d.extra["omegaAudience"] = audience == "auto" ? nil : .string(audience) }
                 if let review = args["needs_review"] as? Bool { d.extra["omegaReview"] = review ? .bool(true) : nil }
                 if name == "release_task" || name == "handoff_task" { d.extra.removeValue(forKey: "omegaClaim"); d.extra.removeValue(forKey: "omegaAssignee") }
                 if name == "handoff_task" { d.extra["omegaReview"] = args["needs_review"] as? Bool == false ? nil : .bool(true) }

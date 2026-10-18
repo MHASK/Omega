@@ -443,7 +443,7 @@ enum LinkedContent {
                                     guard case .object(let link) = links[alias], case .string(let path) = link["path"], case .string(let id) = link["id"] else { return false }
                                     return id == goal.details.id && file.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL == url.standardizedFileURL
                                 }
-                                if linked { total += 1; if ref.status == other.completedStatus { completed += 1 } }
+                                if linked { total += 1; if other.isCompleted(ref.status) { completed += 1 } }
                             }
                         }
                     }
