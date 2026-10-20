@@ -207,6 +207,20 @@ final class EditorBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             notebook.documentIsSource = body["source"] as? Bool ?? false
         case "writingZoom": notebook.changeWritingSize(body["direction"] as? Int ?? 0)
         case "image": chooseImage()
+        case "formulas":
+            guard body["id"] as? String == identity, let source=notebook.selected,
+                  let request=body["request"] as? String, let text=body["markdown"] as? String, text.utf8.count<=2_000_000 else { return }
+            let requestedID=identity, roots=notebook.roots
+            DispatchQueue.global(qos:.utility).async { [weak self] in
+                let result:[String:Any]
+                do { result=try TableCalculation.run(source:source,markdown:text,roots:roots,selected:source,selectedText:text) }
+                catch { result=["error":"#ERROR!","message":error.localizedDescription,"tables":[]] }
+                let json=String(decoding:AssistantWire.json(["request":request,"result":result]),as:UTF8.self)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.identity==requestedID else { return }
+                    self.webView?.evaluateJavaScript("(function(r){window.omegaFormulas?.receive(r.request,r.result)})(\(json))",completionHandler:nil)
+                }
+            }
         case "references":
             guard body["id"] as? String == identity, let source = notebook.selected, let request = body["request"] as? String, let hrefs = body["links"] as? [String] else { return }
             let requestedID = identity

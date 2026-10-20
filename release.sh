@@ -6,6 +6,12 @@ VERSION="${1:?Usage: release.sh version build-number output-directory}"
 BUILD="${2:?Supply an increasing integer build number}"
 DEST="${3:?Supply a release output directory}"
 [[ "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' && "$BUILD" =~ '^[1-9][0-9]*$' ]] || { print -u2 'Invalid release version'; exit 1; }
+python3 - "$VERSION" <<'CHANGELOG'
+import pathlib,re,sys
+version=sys.argv[1]
+assert re.search(r"^## "+re.escape(version)+r"(?:\s|$)",pathlib.Path("CHANGELOG.md").read_text(),re.M), \
+    "Document this release's changes and agent capabilities in CHANGELOG.md before shipping."
+CHANGELOG
 # Official releases must pass Apple notarization. A local development build can
 # still be made with build.sh, but it cannot be published as an app update.
 if [[ -z "${FOLIO_NOTARY_PROFILE:-}" && ( -z "${APPLE_ID:-}" || -z "${APPLE_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ) ]]; then

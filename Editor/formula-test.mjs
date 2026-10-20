@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {FormulaWorkbook,calculatePage,calculateExpression,parseTables} from './table-formulas.js';
+const page='# Model\n\n## Pricing\n\n| Item | Quantity | Unit price | Total |\n| --- | ---: | ---: | ---: |\n| API | 3 | 0.1 | `=B2*C2` |\n| Storage | 2 | $1,250.25 | `=ROUND(B3*C3, 2)` |\n| All | | | `=SUM(D2:D3)` |\n';
+const result=calculatePage('/book/Model.md',page);assert.equal(result.tables[0].rows[1][3].value,'0.3');assert.equal(result.tables[0].rows[3][3].value,'2500.8');
+const w=new FormulaWorkbook('/book/Model.md',page);
+const value=f=>w.result(()=>w.evaluate(f)).value;
+assert.equal(value('=0.1+0.2'),'0.3');assert.equal(value('=ROUND(1.005,2)'),'1.01');assert.equal(value('=ROUND(-1.005,2)'),'-1.01');
+assert.equal(value('=B2*C2*(1+18%)'),'0.354');assert.equal(value('=SUMPRODUCT(B2:B3,C2:C3)'),'2500.8');
+assert.equal(value('=IF(B4=0,0,D4/B4)'),undefined);assert.equal(value('=IF(0,1/0,2)'),'2');
+assert.equal(value('=SUM(COLUMN("","Pricing","Quantity"))'),'5');assert.equal(value('=CELL("","Pricing","API","Unit price")'),'0.1');
+assert.equal(value('=SUM(ROW("",1,"API"))'),'3.4');assert.equal(value('=-2^2'),'-4');assert.equal(value('=2^3^2'),'512');
+assert.equal(value('=ABS(-2)+MIN(B2:B3)+MAX(B2:B3)+AVERAGE(B2:B3)+COUNT(B2:B3)'),'11.5');
+for(const [formula,error] of [['=1/0','#DIV/0!'],['=SUM(A2:A3)','#VALUE!'],['=Z100','#REF!'],['=SUM(1,','#SYNTAX!'],['=ROUND(1,100)','#ARGS!'],['=1e200','#NUM!'],['=2^999999','#NUM!'],['=SUMPRODUCT(B2:B3,C2:C4)','#ARGS!'],['=CELL("https://x/a.md",1,"A1")','#REF!'],['=globalThis.process.exit()','#SYNTAX!'],['=FOO(3)','#NAME!']]){
+ assert.equal(new FormulaWorkbook('/book/Model.md',page).result(()=>new FormulaWorkbook('/book/Model.md',page).evaluate(formula)).error,error,formula);
+}
+const files={'/book/Rates.md':'# Rates\n\n| Name | Price |\n| --- | --- |\n| API | `=0.1+0.2` |\n'};
+let reads=0;const load=(from,raw)=>{reads++;const path=raw==='../Rates.md'?'/book/Rates.md':raw;return files[path]?{path,markdown:files[path]}:null;};
+const remote='| Item | Total |\n| --- | --- |\n| API | `=CELL("../Rates.md","Rates","API","Price")*10` |\n| Again | `=SUM(COLUMN("../Rates.md",1,"Price"))` |';
+let r=calculatePage('/book/Plans/Quote.md',remote,load);assert.equal(r.tables[0].rows[1][1].value,'3');assert.equal(r.tables[0].rows[2][1].value,'0.3');assert.equal(reads,1);assert.deepEqual(r.sources,['/book/Plans/Quote.md','/book/Rates.md']);
+files['/book/Rates.md']=files['/book/Rates.md'].replace('0.1+0.2','0.2+0.3');r=calculatePage('/book/Plans/Quote.md',remote,load);assert.equal(r.tables[0].rows[1][1].value,'5');
+const cyc='| Name | Value |\n| --- | --- |\n| A | `=B3` |\n| B | `=B2` |';assert.equal(calculatePage('a',cyc).tables[0].rows[1][1].error,'#CYCLE!');
+const cross='| Name | Value |\n| --- | --- |\n| A | `=CELL("b.md",1,"B2")` |';
+assert.equal(calculatePage('/a.md',cross,()=>({path:'/b.md',markdown:cross.replace('b.md','/a.md')})).tables[0].rows[1][1].error,'#CYCLE!');
+assert.equal(calculateExpression('/book/Model.md',page,1,'=CELL("","Pricing","missing","Price")').error,'#REF!');
+assert.equal(calculateExpression('/book/Model.md',page+'\n'+page,1,'=CELL("","Pricing","API","Quantity")').error,'#REF!');
+assert.equal(calculateExpression('/book/Model.md',page.replace('| Storage |','| API |'),1,'=CELL("",1,"API","Quantity")').error,'#REF!');
+assert.equal(parseTables('```md\n'+page+'\n```').length,0);
+assert.equal(parseTables('| Name | Value |\n| --- | --- |\n| a\\|b | **42** |')[0].rows[1][0],'a|b');
+assert.equal(calculateExpression('a',page,1,'=SUM(B2:B99999)').error,'#LIMIT!');
+assert.equal(calculateExpression('a',page,1,'=ROUND(1,2,3)').error,'#ARGS!');
+assert.equal(calculateExpression('a',page,1,'=1'.repeat(3000)).error,'#LIMIT!');
+assert.equal(calculateExpression('a',page,1,'=1e-100%').error,'#NUM!');
+console.log('PASS: decimal prices, arithmetic, ranges, named rows/columns, cross-folder chains, refreshed inputs, cycles, ambiguous/missing refs, bounded evaluation and injection rejection.');

@@ -490,3 +490,5 @@ console.log('PASS: inline folder task metadata stays hidden and survives rich no
 
 import {runCoordinationTests} from './task-coordination-test.mjs';
 runCoordinationTests();
+
+import './formula-test.mjs';

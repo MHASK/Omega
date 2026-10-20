@@ -9,6 +9,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import {DiagramCodeBlock} from './diagrams.js';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import {LiveReferences} from './linked-content.js';
+import {TableFormulas} from './table-formula-view.js';
 import { common, createLowlight } from 'lowlight';
 import katex from 'katex';
 import { PageLink } from './page-links.js';
@@ -143,7 +144,7 @@ export function extensions({nativeHistory = false, quoted = false} = {}) {
     TableHeader.extend({ content: 'paragraph' }), TableCell.extend({ content: 'paragraph' }),
     TaskList, TaskItem.configure({ nested: true }), quoted ? LocalImage.extend({addNodeView(){return ({node})=>{const dom=document.createElement("span");dom.className="image-label";dom.textContent=node.attrs.alt||"Image in source note";return {dom};};}}) : LocalImage,
     (quoted ? CodeBlockLowlight : DiagramCodeBlock).configure({ lowlight: createLowlight(common), defaultLanguage: null }),
-    ...(quoted ? [] : [LiveReferences]),
+    ...(quoted ? [] : [LiveReferences,TableFormulas]),
     NoteStart,
     Placeholder.configure({
       showOnlyCurrent: false,

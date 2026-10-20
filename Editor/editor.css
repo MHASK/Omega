@@ -380,3 +380,13 @@ body.has-import-issue{display:flex;flex-direction:column}
 .task-priority{font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:2px 5px;white-space:nowrap}
 
 .task-ready-filters{display:flex;gap:4px;padding:0 0 14px}.task-ready-filters button{border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:5px;font:inherit;cursor:pointer}.task-ready-filters button.active{background:var(--hover);color:var(--text)}
+
+/* Calculated values are a projection: source remains ordinary Markdown. */
+.formula-cell { font-variant-numeric: tabular-nums; }
+.formula-cell .formula-source { display:none; }
+.formula-result { cursor:text; color:var(--text); border-bottom:1px dotted var(--muted); padding-bottom:1px; }
+.formula-error .formula-result { color:#d4aa91; }
+[data-theme="light"] .formula-error .formula-result { color:#945235; }
+.formula-result:focus-visible { outline:1px solid var(--accent); outline-offset:3px; }
+
+.formula-cell code:has(.formula-source) {padding:0;background:none;}

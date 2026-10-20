@@ -14,6 +14,7 @@ struct FolioMain {
                 signer.standardOutput = FileHandle.nullDevice; signer.standardError = FileHandle.nullDevice
                 try signer.run(); signer.waitUntilExit(); guard signer.terminationStatus == 0 else { throw CocoaError(.executableNotLoadable) }
                 let child = Process(); child.executableURL = helper; child.arguments = Array(CommandLine.arguments.dropFirst())
+                child.environment = ProcessInfo.processInfo.environment.merging(["OMEGA_TEST_RESOURCES":Bundle.main.resourceURL!.path]){_,value in value}
                 try child.run(); child.waitUntilExit(); try? FileManager.default.removeItem(at: helper)
                 exit(child.terminationStatus)
             } catch { fputs("Couldn’t start isolated tests: \(error)\n", stderr); exit(1) }

@@ -1,3 +1,4 @@
+import {receiveFormulaPage} from './table-formula-view.js';
 import {isTaskDocument} from './task-model.js';
 import {importIssue,tableIssue,safeCombinedImport} from './import-health.js';
 import {mergeExternal,patchRichDocument,ExternalEditHighlight,externalEditKey} from './external-edits.js';
@@ -318,6 +319,20 @@ for(const el of document.querySelectorAll('[data-command]')){
  el.onmousedown=e=>e.preventDefault();el.onclick=()=>window.folio.command(el.dataset.command);
 }
 $('block-type').onchange=e=>{const level=Number(e.target.value);level?editor.chain().focus().setHeading({level}).run():editor.chain().focus().setParagraph().run();};
+function formulaNotice(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3200);}
+$('table-formula').onmousedown=e=>e.preventDefault();
+$('table-formula').onclick=()=>{
+ if(!editor?.isEditable)return;
+ const {$from}=editor.state.selection;let depth=$from.depth;
+ while(depth>0&&!['tableCell','tableHeader'].includes($from.node(depth).type.name))depth--;
+ if(!depth)return;if($from.node(depth).type.name==='tableHeader'){formulaNotice('Choose a data cell below the header.');return;}
+ const cell=$from.node(depth),start=$from.before(depth)+2,end=start+cell.firstChild.content.size,doc=editor.state.doc;
+ showEntry('Cell formula · A1 is the header row','e.g. =ROUND(B2*C2, 2)',cell.textContent.startsWith('=')?cell.textContent:'=',formula=>{
+  if(!editor?.isEditable||!editor.state.doc.eq(doc)){formulaNotice('This table changed. Select the cell again.');return;}
+  if(!formula.startsWith('=')){formulaNotice('Start a formula with =.');return;}
+  editor.chain().focus().setTextSelection({from:start,to:end}).insertContent({type:'text',text:formula,marks:[{type:'code'}]}).run();
+ });
+};
 for(const id of ['table-rows','table-columns','table-more'])$(id).onchange=e=>{
  const action=e.target.value;e.target.value='';
  if(action.startsWith('align-'))editor.chain().focus().setCellAttribute('align',action.slice(6)).run();
@@ -381,6 +396,8 @@ function find(forward=true){
  else{const results=[];editor.state.doc.descendants((node,pos)=>{if(node.isText){let at=0;while((at=node.text.toLowerCase().indexOf(query.toLowerCase(),at))>=0){results.push({from:pos+at,to:pos+at+query.length});at+=query.length;}}});const selection=editor.state.selection;const result=forward?(results.find(r=>r.from>=selection.to)||results[0]):([...results].reverse().find(r=>r.to<=selection.from)||results.at(-1));if(result)editor.chain().focus().setTextSelection(result).scrollIntoView().run();}
 }
 $('find-input').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();find(!e.shiftKey);}if(e.key==='Escape'){$('find').hidden=true;editor?.commands.focus();}};$('find-next').onclick=()=>find();$('find-close').onclick=()=>{$('find').hidden=true;editor?.commands.focus();};
+window.omegaFormulas={receive:receiveFormulaPage};
+window.omegaFormulaRequest=(request,markdown)=>send('formulas',{id:identity,request,markdown});
 window.omegaReferenceRequest=(request,links)=>send('references',{id:identity,request,links});
 window.omegaReferenceOpen=url=>send('link',{id:identity,url});
 window.folio={

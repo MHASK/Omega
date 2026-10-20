@@ -7,6 +7,7 @@ import Foundation
     let base = FileManager.default.temporaryDirectory.appendingPathComponent("Folio-assistant-tests-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: base) }
     do {
+        try runTableFormulaTests()
         let root = base.appendingPathComponent("Notebook")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = Notebook(recovery: DraftRecovery(directory: base.appendingPathComponent("Recovery")))

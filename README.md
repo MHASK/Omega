@@ -261,6 +261,16 @@ xcrun swiftc GitSync.swift LiveCheckpointStore.swift Tests/GitAutoSyncCheck.swif
 
 Tests use temporary notes and isolated preferences. GitHub Actions runs editor and native checks on pushes and pull requests.
 
+## Table formulas and agent discovery
+
+Use **ƒx** in a table’s toolbar to add a calculation. Results update as source cells change; clicking a result reveals the formula. Formulas remain inline code in ordinary Markdown table cells, including in Git and live editing.
+
+For example, `=ROUND(B2*C2,2)` calculates a line price. `=CELL("../Rates.md","Pricing","API","Unit price")*B2` reads a named value from another page across folders. Cells, ranges, named rows/columns, totals, percentages, conditional calculations and decimal rounding share one bounded decimal engine in the editor and assistant tools. Use named references for references that should survive row/column reordering; A1 and numeric references remain positional.
+
+Agents should call **get_changelog** after an update. **read_tables** discovers tables and returns paginated cell sources/results; **evaluate_formula** returns a decimal string and the source revisions used, without changing files. Both also work via `omega call TOOL`. Reconnect the Folio MCP connection after updating to discover these tools.
+
+See [CHANGELOG.md](CHANGELOG.md) for every new capability, full formula syntax, examples, limits and error handling. New product and agent features must be documented there before release. Run `node Editor/formula-test.mjs` and `Tests/check-formulas.sh` for formula and native editor checks; packaged `--mcp-test` also covers native calculation, permissions and tool discovery.
+
 ## Linux status
 
 A Linux desktop release is **not available yet**. The release requirement is full Mac feature parity, including Git sync and review, live cursors, settings, MCP, recovery, and a verified update path. A limited notes-only build will not be published as a completed Linux port.
