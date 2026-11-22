@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { Editor } from '@tiptap/core';
 import { extensions, needsSource, noteContent } from './schema.js';
+import {importIssue} from './import-health.js';
 import { tableContext, runTableAction, appendToTable } from './table-actions.js';
 import { SearchMatch, matchKey, fold, words, documentWords, resolveSourceMatch, resolveRichMatch, showRichMatch, clearRichMatch } from './search-navigation.js';
 const dom=new JSDOM('<div id="editor"></div>',{pretendToBeVisual:true,url:'https://test.invalid'});
@@ -23,6 +24,22 @@ const table=editor.getJSON().content.find(n=>n.type==='table');assert.equal(tabl
 editor.commands.undo();assert.equal(editor.getJSON().content.find(n=>n.type==='table').content[0].content.length,2);
 for(const example of ['---\ntitle: Metadata\n---\n\nText','Text[^1]\n\n[^1]: Footnote','<details><summary>Test</summary>Text</details>'])assert(needsSource(example));
 for(const example of ['# Heading\n\nNormal text','```html\n<div>code</div>\n```','A `<div>` example',source])assert(!needsSource(example),example);
+// Imported tables and our own Shift+Enter serialization must reopen visually.
+const breakTable='# Study plan\n\n| Input | Detail |\n| --- | --- |\n| Analysis | **Weight**<br>Trend<br/>`value`<br />[Source](./Source.md)<BR>Next |\n\nFirst<br>Second\n\nEnd.';
+assert(!needsSource(breakTable));
+const breaks=new Editor({element:document.createElement('div'),extensions:extensions(),...noteContent(breakTable)});
+let breakCount=0;breaks.state.doc.descendants(n=>{if(n.type.name==='hardBreak')breakCount++;});
+assert.equal(breakCount,5,'All line-break variants render as breaks, including inside tables');
+breaks.commands.insertContentAt(breaks.state.doc.content.size-1,' Still here.');
+const breaksSaved=breaks.getMarkdown();
+assert(!needsSource(breaksSaved),'The editor must accept the Markdown it saves');
+assert.deepEqual(breaks.schema.nodeFromJSON(breaks.markdown.parse(breaksSaved)).toJSON(),breaks.getJSON(),'Table cells, line breaks, links and marks survive edit/save/reopen');
+breaks.destroy();
+for(const html of ['<br class="spaced">','<br onclick="alert(1)">','<br data-test="x"/>','<details>Keep me</details>','<!-- unfinished'])assert(needsSource(html),'Unsupported HTML must remain lossless: '+html);
+assert.equal(importIssue(breakTable),null);
+const sourceDiagnostic='<!-- multi\nline marker -->\n\n```html\n<div>example</div>\n```\n\nText<br>break\n\n<details>Preserve me</details>';
+assert.equal(importIssue(sourceDiagnostic).line,10,'Diagnostics retain source line numbers after comments and fenced examples');
+assert(importIssue(sourceDiagnostic).message.includes('<details>'));
 editor.destroy();console.log('PASS: headings, marks, links, nested lists, tasks, code, tables, alignment, escaped pipes, local images, math, Unicode, save/reopen, table mutations, undo, and lossless source fallback.');
 
 // Search arrival uses the same parser and schema as real notes; it must neither

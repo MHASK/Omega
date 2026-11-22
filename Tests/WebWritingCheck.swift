@@ -93,6 +93,24 @@ final class WritingTestFiles: NSObject, WKURLSchemeHandler {
     }
     func run() async {
         do {
+            let breaks = "# Plan\n\n| Input | Detail |\n| --- | --- |\n| Analysis | **Weight**<br>Trend<br/>`value`<br />[Source](./Source.md)<BR>Next |\n\nFirst<br>Second\n\nEnd."
+            try await load(0,breaks)
+            try check(try await js(0,"document.querySelector('#source').hidden && document.querySelector('#import-health').hidden && document.querySelectorAll('.tiptap table br').length===4") as! Bool,"table HTML line breaks open directly in visual view")
+            try check(try await text(0)==breaks,"opening a table with breaks retains exact source bytes")
+            try await append(0," Still here.")
+            let editedBreaks=try await text(0)
+            try check(editedBreaks.contains("Still here.") && editedBreaks.contains("**Weight**") && editedBreaks.contains("./Source.md"),"editing preserves table text, formatting and links")
+            try await load(0,editedBreaks)
+            try check(try await js(0,"document.querySelector('#source').hidden && document.querySelectorAll('.tiptap table br').length===4") as! Bool,"saved table breaks reopen visually")
+            _ = try await js(0,"window.folio.command('source');window.folio.command('source');true")
+            try check(try await js(0,"document.querySelector('#source').hidden") as! Bool,"Markdown to visual switch works for supported table breaks")
+            try await screenshot("table-breaks-visual")
+            let unsupportedBreaks="# Plan\n\nText<br class=\"spaced\">preserved"
+            try await load(0,unsupportedBreaks)
+            try check(try await js(0,"document.querySelector('#import-health').textContent.includes('Line 3') && document.querySelector('#import-health button').textContent==='Show in Markdown'") as! Bool,"unsupported attributes explain the exact source line instead of an ineffective retry")
+            try await click(0,"#import-health button")
+            try check(try await js(0,"(()=>{const s=document.querySelector('#source');return s.value.slice(s.selectionStart,s.selectionEnd)==='Text<br class=\"spaced\">preserved'})()") as! Bool,"fallback action selects the unsupported line")
+            try check(try await text(0)==unsupportedBreaks,"fallback never rewrites unsupported content")
             let markers = "# Now\n\n<!-- timeline:start -->\n## Timeline\n\n- **Latest** update\n- [ ] Follow up\n\n<!-- timeline:end -->\n\nA quiet ending.\n"
             try await load(0, markers)
             try check(try await js(0,"document.querySelector('#source').hidden && document.querySelectorAll('[data-source-comment]').length === 2") as! Bool,"assistant timeline markers keep the note visual")

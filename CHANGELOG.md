@@ -2,6 +2,14 @@
 
 Agents: call `get_context`, then `get_changelog` after updating Omega. Reconnect the Folio MCP connection to discover new tool schemas. The same tools are available through `omega call TOOL` with JSON on stdin. Changes below describe the app version that bundles this file; uninstalled source changes do not add tools to a running older app.
 
+## 1.3.17 — Visual table recovery (2026-11-22)
+
+- Notes containing ordinary `<br>`, `<br/>`, `<br />`, or uppercase line breaks now open in the visual editor, including inside Markdown tables. Previously, the source-preservation check rejected these supported breaks and **Try visual view** returned to the same warning.
+- Table line breaks, formatting and links survive editing, saving and reopening. Opening a note still preserves its original Markdown bytes until you edit it.
+- Unsupported HTML and extended Markdown remain preserved in source mode. The warning identifies the unsupported tag and line; **Show in Markdown** selects that line instead of offering an ineffective retry. Automatic recovery after a supported outside edit remains available.
+- Agents may use bare `<br>` for line breaks inside table cells. Tags with attributes and other unsupported HTML still require Markdown editing; no new MCP tools or schema changes.
+- Notebook folders are local files. Closing a notebook hides it from the sidebar without deleting its documents; use **File → Open Folder…** to reopen its existing folder.
+
 ## 1.3.16 — Table calculations (2026-10-20)
 
 - Table cells can hold formulas. Omega shows their calculated values; click a result to edit its formula, or use **ƒx** in the table toolbar. Formula source remains in Markdown, Git history and live edits. Calculated values are never written over formulas.

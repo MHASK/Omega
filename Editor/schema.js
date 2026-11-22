@@ -55,11 +55,26 @@ export function visualMarkdown(text) {
 
 // Extended dialects open losslessly in source mode; never silently discard them.
 export function needsSource(markdown) {
-  const withoutCode = withoutWritingMarkup(withoutSourceComments(visualMarkdown(markdown))).replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm, '').replace(/`[^`\n]*`/g, '');
-  return /^ {0,3}(?:`{3,}|~{3,})[ \t]*database(?:\s|$)/mi.test(markdown)
-    || /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\n|$)/.test(markdown)
-    || /<!--|<\/?[a-z][\w-]*(?:\s[^>]*|\s*\/?)>/i.test(withoutCode)
-    || /^\s*\[\^[^\]]+\]:|^:::+\s*\w|^\s*:\s+\S/m.test(withoutCode);
+  return sourceIssue(markdown)!==null;
+}
+export function sourceIssue(markdown) {
+  const issue=(text,match,message)=>match ? {line:text.slice(0,match.index).split('\n').length,message} : null;
+  const database=issue(markdown,/^ {0,3}(?:`{3,}|~{3,})[ \t]*database(?:\s|$)/mi.exec(markdown),'This database block is preserved in Markdown. Visual editing is not supported yet.');
+  if(database)return database;
+  if(/^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\n|$)/.test(markdown))return {line:1,message:'This note has front matter that the visual editor cannot edit yet.'};
+  // Keep line numbers while ignoring code and records that have lossless nodes.
+  // Bare breaks are supported by hardBreak, including table save/reopen. HTML
+  // with attributes still needs source mode so no attributes are silently lost.
+  const clean=withoutWritingMarkup(withoutSourceComments(visualMarkdown(markdown)))
+    .replace(/^(`{3,}|~{3,}).*\n[\s\S]*?^\1\s*$/gm,raw=>raw.replace(/[^\n]/g,''))
+    .replace(/`[^`\n]*`/g,'').replace(/<br[ \t]*\/?>/gi,'');
+  const html=/<!--|<\/?[a-z][\w-]*(?:\s[^>]*|\s*\/?)>/i.exec(clean);
+  if(html){
+    const tag=html[0].match(/^<\/?[\w-]+/)?.[0]+'>';
+    return issue(clean,html,html[0]==='<!--'?'An unfinished or unsupported comment needs Markdown editing. Your text is preserved.':`The ${tag} HTML tag${/^<br\b/i.test(html[0])?' has attributes that need':' needs'} Markdown editing. Your text is preserved.`);
+  }
+  const extended=/^[ \t]*\[\^[^\]]+\]:|^:::+[ \t]*\w|^[ \t]*:[ \t]+\S/m.exec(clean);
+  return issue(clean,extended,'This Markdown extension is not supported by the visual editor yet. Your text is preserved.');
 }
 
 const LocalImage = Image.extend({

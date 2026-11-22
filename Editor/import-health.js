@@ -1,17 +1,11 @@
 import {isTaskDocument,taskImport,parseTasks} from './task-model.js';
-import {needsSource} from './schema.js';
+import {sourceIssue} from './schema.js';
 
 // Diagnostics never repair or rewrite the source. An outside editor owns its
 // bytes until a user deliberately changes them in Omega.
 export function importIssue(text){
  if(isTaskDocument(text))return taskImport(text).issue;
- if(needsSource(text)){
-  const message=/^---\r?\n/.test(text)?'This note has front matter that the visual editor cannot edit yet.':
-   /^\s*\[\^[^\]]+\]:/m.test(text)?'This note uses footnotes that the visual editor cannot edit yet.':
-   'This note contains extended Markdown or an unfinished HTML record that the visual editor cannot safely edit.';
-  return {message};
- }
- return null;
+ return sourceIssue(text);
 }
 export function tableIssue(text){
  let fenced=null,inTable=false;

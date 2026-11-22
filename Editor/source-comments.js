@@ -7,7 +7,7 @@ export function ordinaryComment(raw) {
     && !/^<!--\s*(?:folio:|omega-comment:)/i.test(raw);
 }
 export function withoutSourceComments(text) {
-  return text.replace(/<!--[\s\S]*?-->/g, raw => ordinaryComment(raw) ? '' : raw);
+  return text.replace(/<!--[\s\S]*?-->/g, raw => ordinaryComment(raw) ? raw.replace(/[^\n]/g, '') : raw);
 }
 function commentNode(block) {
   const name = block ? 'sourceComment' : 'inlineSourceComment';

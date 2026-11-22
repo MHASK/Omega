@@ -44,13 +44,20 @@ function updateHealth(){
  title.textContent=recoveryPreview?'Showing the last valid task view · read only':issue.warning?'Check this table':'Markdown preserved';
  message.textContent=(issue.line?`Line ${issue.line} · `:'')+issue.message;
  copy.append(title,message);health.append(copy);
- const action=document.createElement('button');action.textContent=sourceMode&&lastTask?'Last valid view':sourceMode?'Try visual view':'View Markdown';
+ const canRecover=sourceMode&&lastTask&&isTaskDocument(text),blocked=sourceMode&&!!importIssue(text);
+ const action=document.createElement('button');action.textContent=canRecover?'Last valid view':blocked?'Show in Markdown':sourceMode?'Try visual view':'View Markdown';
  action.onclick=()=>{
-  if(sourceMode&&lastTask&&importIssue(value()))window.folio.load({id:identity,text:value(),reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});
+  if(canRecover)window.folio.load({id:identity,text:value(),reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});
+  else if(blocked)showSourceIssue(issue);
   else if(sourceMode){window.folio.load({id:identity,text:value(),reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});}
   else {const line=issue.line;window.folio.load({id:identity,text:value(),source:true,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});if(line){const at=source.value.split('\n').slice(0,line-1).join('\n').length+(line>1?1:0);source.focus();source.setSelectionRange(at,at);cursor();}}
  };
  health.append(action);sourceHighlight.style.top=health.getBoundingClientRect().height+'px';
+}
+function showSourceIssue(issue){
+ const lines=source.value.split('\n'),line=Math.max(0,(issue?.line||1)-1),at=lines.slice(0,line).join('\n').length+(line?1:0);
+ source.focus();source.setSelectionRange(at,at+(lines[line]?.length||0));
+ source.scrollTop=Math.max(0,line*parseFloat(getComputedStyle(source).lineHeight)-source.clientHeight/3);cursor();
 }
 function selectionState() {
  if(taskMode)return JSON.stringify({tasks:true});
@@ -531,7 +538,7 @@ window.folio={
   if(name==='find'){$('find').hidden=false;$('find-input').focus();return;}
   if(name==='source'&&live){send('liveNotice',{message:'Leave live editing before switching document formats.'});return;}
   if(name==='source'){
-    const text=value();if(sourceMode&&needsSource(text)&&!parseTasks(text)){$('toast').textContent='Extended Markdown · source view';$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,2200);return;}
+    const text=value();if(sourceMode&&needsSource(text)&&!parseTasks(text)){updateHealth();showSourceIssue(importIssue(text));return;}
     const wasSource=sourceMode;this.load({id:identity,text,source:!wasSource,reading:readOnly,theme:document.documentElement.dataset.theme,zoom:lastScale});this.focus();return;
   }
   if(name==='closeWriting'){writing.close();return;}
